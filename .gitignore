@@ -125,3 +125,5 @@ modules.xml
 input
 key
 logs
+__pycache__/
+debug

@@ -2,12 +2,14 @@ import os
 import wandb
 import logging
 import argparse
+import numpy as np
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 import torch
 import torch.optim as optim
 import segmentation_models_pytorch as smp
+from segmentation_models_pytorch.utils.losses import DiceLoss, BCEWithLogitsLoss
 
 from src.utils import seed_everything
 from src.utils import make_cat_df
@@ -44,6 +46,8 @@ def main():
     main_path = '.'
     data_path = os.path.join(main_path, 'input', 'data')
 
+    mean = np.array([0.46098186, 0.44022841, 0.41892368], dtype=np.float32)
+    std  = np.array([0.21072529, 0.20763867, 0.21613272], dtype=np.float32)
 
     # define transform
     trn_tfms = A.Compose([
@@ -65,7 +69,6 @@ def main():
         A.Normalize(),
         ToTensorV2()
     ])
-
 
 
     # define train & valid dataset
@@ -110,6 +113,13 @@ def main():
             encoder_weights="imagenet",
             in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
             classes=12,  # model output channels (number of classes in your dataset)
+        )
+    elif args.model_type == 'deeplabv3':
+        model = smp.DeepLabV3(
+            encoder_name='efficientnet-b0',
+            encoder_weights='imagenet',
+            in_channels=3,
+            classes=12
         )
 
     model = model.to(device)

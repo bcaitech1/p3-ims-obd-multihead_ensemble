@@ -192,8 +192,8 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, logger, devi
                             cls_mask[a_mask] = cls_colors[i]
                             ori_image[a_mask] = cv2.addWeighted(ori_image[a_mask], 0.2, cls_mask[a_mask], 0.8, gamma=0.0)
 
-                    cv2.imwrite(os.path.join(debug_path, f"{cnt}.jpg"), ori_image)
-                    cnt += 1
+                        cv2.imwrite(os.path.join(debug_path, f"{cnt}.jpg"), ori_image)
+                        cnt += 1
 
 
                 mIoU = label_accuracy_score(masks, preds, n_class=12)[2]

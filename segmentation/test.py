@@ -82,7 +82,7 @@ def main():
             oms = torch.argmax(preds.squeeze(), dim=1).detach().cpu().numpy()
 
             if args.debug:
-                debug_path = os.path.join('.', 'debug', 'test')
+                debug_path = os.path.join('.', 'debug', 'test', args.postfix)
                 if not os.path.exists(debug_path):
                     os.makedirs(debug_path)
 
@@ -98,8 +98,8 @@ def main():
                         cls_mask[a_mask] = cls_colors[i]
                         ori_image[a_mask] = cv2.addWeighted(ori_image[a_mask], 0.2, cls_mask[a_mask], 0.8, gamma=0.0)
 
-                cv2.imwrite(os.path.join(debug_path, f"{cnt}.jpg"), ori_image)
-                cnt += 1
+                    cv2.imwrite(os.path.join(debug_path, f"{cnt}.jpg"), ori_image)
+                    cnt += 1
 
             # resize (256 x 256)
             temp_mask = []

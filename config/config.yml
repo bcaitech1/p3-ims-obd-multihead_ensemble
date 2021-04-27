@@ -1,0 +1,14 @@
+base:
+  seed: 42
+  backbone: 'timm-efficientnet-b1'
+  model_arc: 'PAN'
+  num_classes: 12
+  output_dir: '../results/'
+  train_args:
+    num_epochs: 20
+    train_batch_size: 16
+    lr: 0.001
+    weight_decay: 0.0
+    log_intervals: 10         
+  val_args:    
+    val_batch_size: 16

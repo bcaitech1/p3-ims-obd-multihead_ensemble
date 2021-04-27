@@ -1,0 +1,9 @@
+base:
+  seed: 42
+  backbone: 'timm-efficientnet-b1'
+  model_arc: 'PAN'
+  num_classes: 12
+  debug: True
+  checkpoint_path: '../results/1_epoch_29.00%_with_val.pth'
+  test_batch_size: 16
+  

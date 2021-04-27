@@ -90,7 +90,6 @@ def main():
                         num_workers=3)
 
 
-
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     if args.model_type == 'fcn8s':
         backbone = vgg16(pretrained=True)
@@ -102,6 +101,7 @@ def main():
             in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
             classes=12,  # model output channels (number of classes in your dataset)
         )
+        
     model = model.to(device)
     optimizer = optim.AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.decay)
     # criterion = nn.CrossEntropyLoss()

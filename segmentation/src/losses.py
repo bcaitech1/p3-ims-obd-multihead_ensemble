@@ -59,18 +59,19 @@ class IoULoss(nn.Module):
 
     def forward(self, inputs, targets, smooth=1):
         # flatten label and prediction tensors
-        inputs = F.sigmoid(inputs)
-        inputs = inputs.view(-1)
-        targets = targets.view(-1)
+        num_classes = inputs.size(1)
+        true_1_hot = torch.eye(num_classes)[targets]
 
-        # intersection is equivalent to True Positive count
-        # union is the mutually inclusive area of all labels & predictions
-        intersection = (inputs * targets).sum()
-        total = (inputs + targets).sum()
-        union = total - intersection
+        true_1_hot = true_1_hot.permute(0, 3, 1, 2).float()
+        probas = F.softmax(inputs, dim=1)
+
+        true_1_hot = true_1_hot.type(inputs.type())
+        dims = (0,) + tuple(range(2, targets.ndimension()))
+        intersection = torch.sum(probas * true_1_hot, dims)
+        cardinality = torch.sum(probas + true_1_hot, dims)
+        union = cardinality - intersection
 
         IoU = (intersection + smooth) / (union + smooth)
-
         return 1 - IoU
 
 
@@ -78,18 +79,19 @@ class FocalLoss(nn.Module):
     def __init__(self, alpha=0.5, gamma=2, weight=None, size_average=True):
         super(FocalLoss, self).__init__()
 
-        self.alpha= alpha
+        self.alpha = alpha
         self.gamma = gamma
+        self.weight = weight
 
-    def forward(self, inputs, targets, smooth=1):
-        # flatten label and prediction tensors
-        inputs = inputs.view(-1)
-        targets = targets.view(-1)
-
-        # first compute binary cross-entropy
-        BCE = F.binary_cross_entropy(inputs, targets, reduction='mean')
-        BCE_EXP = torch.exp(-BCE)
-        focal_loss = self.alpha * (1 - BCE_EXP) ** self.gamma * BCE
+    def forward(self, inputs, targets):
+        log_prob = F.log_softmax(inputs, dim=1)
+        prob = torch.exp(log_prob)
+        focal_loss = F.nll_loss(
+            self.alpha * ((1 - prob) ** self.gamma) * log_prob,
+            targets,
+            weight=self.weight,
+            reduction='mean'
+        )
 
         return focal_loss
 

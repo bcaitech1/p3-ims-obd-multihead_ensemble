@@ -127,3 +127,4 @@ key
 logs
 __pycache__/
 debug
+*.csv

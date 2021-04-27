@@ -47,6 +47,16 @@ def main():
 
     # define transform
     trn_tfms = A.Compose([
+        A.HorizontalFlip(p=0.7),
+        A.VerticalFlip(p=0.5),
+        A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.15, rotate_limit=20),
+
+        # A.OneOf([
+        #     A.RGBShift(p=1.0),
+        #     A.HueSaturationValue(p=1.0),
+        #     A.ChannelShuffle(p=1.0),
+        # ], p=.5),
+
         A.Normalize(),
         ToTensorV2()
     ])
@@ -101,7 +111,7 @@ def main():
             in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
             classes=12,  # model output channels (number of classes in your dataset)
         )
-        
+
     model = model.to(device)
     optimizer = optim.AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.decay)
     # criterion = nn.CrossEntropyLoss()
@@ -127,7 +137,7 @@ def main():
             save_model(model, version=args.version, save_type='loss')
 
         if best_mIoU < val_mIoU:
-            logger.info(f"Best loss {best_mIoU:.5f} -> {val_mIoU:.5f}")
+            logger.info(f"Best mIoU {best_mIoU:.5f} -> {val_mIoU:.5f}")
             best_mIoU = val_mIoU
             save_model(model, version=args.version, save_type='mIoU')
 

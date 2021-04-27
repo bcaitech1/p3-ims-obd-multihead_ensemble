@@ -74,7 +74,8 @@ class SegmentationDataset(Dataset):
                 images = transformed["image"]
 
             return {
-                'image': images
+                'image': images,
+                'info': image_infos['file_name']
             }
 
     def __len__(self) -> int:

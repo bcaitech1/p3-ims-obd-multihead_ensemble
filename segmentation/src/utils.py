@@ -175,7 +175,7 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, logger, devi
                 val_losses.append(loss.item())
 
                 if debug:
-                    debug_path = os.path.join('.', 'debug')
+                    debug_path = os.path.join('.', 'debug', 'valid')
                     if not os.path.exists(debug_path):
                         os.makedirs(debug_path)
 

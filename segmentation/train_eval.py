@@ -7,6 +7,7 @@ from albumentations.pytorch import ToTensorV2
 
 import torch
 import torch.optim as optim
+import segmentation_models_pytorch as smp
 
 from src.utils import seed_everything
 from src.utils import make_cat_df
@@ -30,6 +31,7 @@ def main():
     parser.add_argument('--decay', default=1e-6, type=float)
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--version', default='v1', type=str)
+    parser.add_argument('--model_type', default='fcn8s', type=str)
 
 
     args = parser.parse_args()
@@ -90,8 +92,16 @@ def main():
 
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    backbone = vgg16(pretrained=True)
-    model = FCN8s(backbone=backbone)
+    if args.model_type == 'fcn8s':
+        backbone = vgg16(pretrained=True)
+        model = FCN8s(backbone=backbone)
+    elif args.model_type == "unet":
+        model = smp.Unet(
+            encoder_name="efficientnet-b3",  # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+            encoder_weights="imagenet",
+            in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+            classes=12,  # model output channels (number of classes in your dataset)
+        )
     model = model.to(device)
     optimizer = optim.AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.decay)
     # criterion = nn.CrossEntropyLoss()

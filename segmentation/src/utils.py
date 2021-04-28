@@ -8,7 +8,9 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 import torch
+
 from torch.cuda.amp import GradScaler, autocast  # 변경 부분
+
 
 num_cls = 12
 cmap = plt.get_cmap("rainbow")
@@ -88,6 +90,7 @@ def _fast_hist(label_true, label_pred, n_class):
     return hist
 
 
+
 def train_label_accuracy_score(label_trues, label_preds, n_class):
     """Returns accuracy score evaluation result.
       - overall accuracy
@@ -152,7 +155,7 @@ def add_hist(hist, label_trues, label_preds, n_class):
     return hist    
 
 ################################################################################################    
-    
+
 def save_model(model, version, save_type='loss'):
     save_path = os.path.join(f'./ckpts/{version}')
     if not os.path.exists(save_path):
@@ -160,6 +163,7 @@ def save_model(model, version, save_type='loss'):
 
     save_dir = os.path.join(save_path, f'best_{save_type}.pth')
     torch.save(model.state_dict(), save_dir)
+
 
 
 def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, logger, device, debug=False , cutout_prob = 0 ):
@@ -176,7 +180,7 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
 
             optimizer.zero_grad()
             images, masks = sample['image'], sample['mask']
-            
+
             r = np.random.rand(1)
             if cutout_prob and cutout_prob > r:
                 images = Cutout(2, 50 ,images, masks) # holes  , size
@@ -201,16 +205,18 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
             trn_bar.set_postfix(trn_loss=np.mean(trn_losses),
                                 trn_mIoU=np.mean(trn_mIoU))
 
- 
+
     model.eval()
     val_mIoU = []
     val_losses = []
     hist = np.zeros((12, 12))
+
     logger.info(f"\nValid on Epoch {epoch+1}")
     with torch.no_grad():
         with tqdm(val_dl, total=len(val_dl), unit='batch') as val_bar:
             for batch, sample in enumerate(val_bar):
                 val_bar.set_description(f"Valid Epoch {epoch+1}")
+                
                 images, masks = sample['image'], sample['mask']
                 images, masks = images.to(device), masks.to(device).long()
 
@@ -220,7 +226,7 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
                 
                 outputs = torch.argmax(preds, dim=1).detach().cpu().numpy()
                 hist = add_hist(hist, masks.detach().cpu().numpy(), outputs, n_class=12)
-                    
+
                 if debug:
                     debug_path = os.path.join('.', 'debug', 'valid')
                     if not os.path.exists(debug_path):
@@ -230,7 +236,9 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
                     pred_masks = torch.argmax(preds.squeeze(), dim=1).detach().cpu().numpy()
                     for idx, file_name in enumerate(file_names):
                         pred_mask = pred_masks[idx]
+
                         ori_image = cv2.imread(os.path.join('/opt/ml/input/data', file_name))
+
                         ori_image = ori_image.astype(np.float32)
 
                         for i in range(1, 12):
@@ -243,7 +251,9 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
                         cnt += 1
 
 
+
                 mIoU = train_label_accuracy_score(masks, preds, n_class=12)[2]
+
                 val_mIoU.append(mIoU)
 
                 if (batch + 1) % (int(len(trn_dl) // 10)) == 0:
@@ -252,7 +262,7 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
 
                 val_bar.set_postfix(val_loss=np.mean(val_losses),
                                     val_mIoU=np.mean(val_mIoU))
-                
+
             mIoU_per_epoch = val_label_accuracy_score(hist)[2]
             print(f"Validation Epochs {epoch+1} | mIoU per epoch : {mIoU_per_epoch}")
     
@@ -285,3 +295,4 @@ def Cutout(n_holes , length , imgs, label):
             imgs[idx] = img * mask
                 
         return imgs
+

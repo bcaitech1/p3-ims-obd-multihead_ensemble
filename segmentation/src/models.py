@@ -201,3 +201,4 @@ if __name__ == "__main__":
         tmp_input = torch.zeros((2, 3, 512, 512))
         tmp_output = model(tmp_input)
         print(tmp_output.shape)
+

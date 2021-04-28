@@ -11,10 +11,12 @@ import torch.optim as optim
 import segmentation_models_pytorch as smp
 from segmentation_models_pytorch.utils.losses import DiceLoss, BCEWithLogitsLoss
 
+
 from src.utils import *
 from src.dataset import SegmentationDataset
 from src.models import FCN8s
 from src.losses import *
+
 
 from torch.utils.data import DataLoader
 
@@ -27,6 +29,7 @@ from importlib import import_module
 
 def main():
     parser = argparse.ArgumentParser(description="MultiHead Ensemble Team")
+
     # Hyperparameters
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--trn_ratio', default=0.0, type=float)
@@ -48,6 +51,7 @@ def main():
     parser.add_argument('--data_path', default='/opt/ml/input/data', type=str)
     parser.add_argument('--version', default='v1', type=str)
 
+
     args = parser.parse_args()
     print(args)
 
@@ -59,8 +63,10 @@ def main():
 
     # define transform
     trn_tfms = A.Compose([
+
         A.Normalize(),
         A.Resize (256, 256 , p=1),
+
         ToTensorV2()
     ])
 
@@ -73,6 +79,7 @@ def main():
 
     # define train & valid dataset
     if args.trn_ratio:
+
         total_annot = os.path.join(args.data_path, 'train_all.json')
         total_cat = make_cat_df(total_annot, debug=True)
         total_ds = SegmentationDataset(data_dir=total_annot, cat_df=total_cat, mode='train', transform=None)
@@ -124,6 +131,7 @@ def main():
     file_handler = logging.FileHandler(os.path.join(logger_dir, f'{args.version}.log'))
     logger.addHandler(file_handler)
 
+
     wandb.login()
     
     best_loss = float("INF")
@@ -134,6 +142,7 @@ def main():
         if early_cnt >= args.early_stop : break
             
         trn_loss, trn_mIoU, val_loss, val_mIoU = train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, logger, device, args.cutout)
+
 
         if best_loss > val_loss:
             logger.info(f"Best loss {best_loss:.5f} -> {val_loss:.5f}")
@@ -148,6 +157,7 @@ def main():
             best_mIoU = val_mIoU
             save_model(model, version=args.version, save_type='mIoU')
     wandb.finish()
+
 
 if __name__ == "__main__":
     main()

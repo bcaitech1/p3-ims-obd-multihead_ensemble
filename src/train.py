@@ -1,6 +1,7 @@
 import os
 import torch
 import torch.nn as nn
+<<<<<<< HEAD
 import segmentation_models_pytorch
 
 from tqdm import tqdm
@@ -11,6 +12,16 @@ from importlib import import_module
 
 from . import lovasz_losses as L
 from .utils import AverageMeter, pixel_accuracy, mIoU, get_learning_rate
+=======
+
+from tqdm import tqdm
+from adamp import AdamP
+from torchsummary import summary as summary_
+from importlib import import_module
+
+from . import lovasz_losses as L
+from .utils import AverageMeter, pixel_accuracy, mIoU
+>>>>>>> ac179e19fad2a264fcb4392d629c6b77a4cf7c1c
 from .losses import *
 from .model import CustomFCN8s, CustomFCN16s, CustomFCN32s
 
@@ -46,9 +57,14 @@ def train(cfg, train_loader, val_loader):
     model.to(device)
     summary_(model, (3, 512, 512), train_batch_size)
 
+<<<<<<< HEAD
     optimizer = MADGRAD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = ReduceLROnPlateau(optimizer, 'min')
     criterion = nn.CrossEntropyLoss()
+=======
+    optimizer = AdamP(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    criterion = nn.CrossEntropyLoss()    
+>>>>>>> ac179e19fad2a264fcb4392d629c6b77a4cf7c1c
 
     best_score = 0.
 
@@ -85,9 +101,14 @@ def train(cfg, train_loader, val_loader):
 
             if i % log_intervals == 0:
                 tqdm.write(f'Epoch : [{epoch + 1}/{num_epochs}][{i}/{len(train_loader)}] || '
+<<<<<<< HEAD
                            f'LR : {get_learning_rate(optimizer)[0]} ||'
                            f'Train Loss : {loss_values.val:.4f} ({loss_values.avg:.4f}) || '
                            f'Train Pixel Acc : {accuracy.val * 100.0:.3f}% ({accuracy.avg * 100.0:.4f}%) || '
+=======
+                           f'Train Loss : {loss_values.val:.4f} ({loss_values.avg:.4f}) || '
+                           f'Train Accuracy : {accuracy.val * 100.0:.3f}% ({accuracy.avg * 100.0:.4f}%) || '
+>>>>>>> ac179e19fad2a264fcb4392d629c6b77a4cf7c1c
                            f'Train mean IoU : {mIoU_values.val * 100.0:.3f}% ({mIoU_values.avg * 100.0:.3f}%)')
 
 
@@ -99,7 +120,11 @@ def train(cfg, train_loader, val_loader):
             val_accuracy = AverageMeter()            
 
             for i, (images, masks, _) in enumerate(tqdm(val_loader, desc=f'Validation')):
+<<<<<<< HEAD
                 images = torch.stack(images)
+=======
+                images = torch.stack(images)       
+>>>>>>> ac179e19fad2a264fcb4392d629c6b77a4cf7c1c
                 masks = torch.stack(masks).long()  
 
                 images, masks = images.to(device), masks.to(device)
@@ -122,6 +147,7 @@ def train(cfg, train_loader, val_loader):
                    f'Val Accuracy : {val_accuracy.avg * 100.0:.3f}% || '
                    f'Val mean IoU : {val_mIoU_values.avg * 100.0:.3f}%')
 
+<<<<<<< HEAD
         is_best = val_mIoU_values.avg >= best_score
         best_score = max(val_mIoU_values.avg, best_score)
 
@@ -131,3 +157,10 @@ def train(cfg, train_loader, val_loader):
         scheduler.step(val_loss_values.avg)
 
     return best_score
+=======
+        is_best = mIoU_values.avg >= best_score
+        best_score = max(mIoU_values.avg, best_score)
+
+        if is_best:
+            torch.save(model.state_dict(), os.path.join(OUTPUT_DIR, MODEL_ARC, f'{epoch + 1}_epoch_{best_score * 100.0:.2f}%_with_val.pth'))
+>>>>>>> ac179e19fad2a264fcb4392d629c6b77a4cf7c1c

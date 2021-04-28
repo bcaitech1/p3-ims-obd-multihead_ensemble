@@ -14,10 +14,6 @@ from torch.utils.data import DataLoader
 
 from .dataset import RecycleTrashDataset
 
-<<<<<<< HEAD
-
-=======
->>>>>>> ac179e19fad2a264fcb4392d629c6b77a4cf7c1c
 def pixel_accuracy(logits, labels):
     with torch.no_grad():
         logits = torch.argmax(F.softmax(logits, dim=1), dim=1)
@@ -99,7 +95,6 @@ def seed_everything(seed: int = 42):
     torch.backends.cudnn.benchmark = True  # type: ignore
 
 
-<<<<<<< HEAD
 def get_learning_rate(optimizer):
     lr = []
     for param_group in optimizer.param_groups:
@@ -113,9 +108,6 @@ def collate_fn(batch):
 
 
 def get_dataloader(data_dir='train.json', mode='train', transform=None, batch_size=16, shuffle=True, collate_fn=collate_fn):
-=======
-def get_dataloader(data_dir='train.json', mode='train', transform=None, batch_size=16, shuffle=True, collate_fn=None):
->>>>>>> ac179e19fad2a264fcb4392d629c6b77a4cf7c1c
     dataset = RecycleTrashDataset(data_dir=data_dir, mode=mode, transform=transform)
 
     loader = DataLoader(

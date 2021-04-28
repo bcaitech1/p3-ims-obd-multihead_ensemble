@@ -3,6 +3,21 @@ base:
   backbone: 'timm-efficientnet-b2'
   model_arc: 'PAN'
   num_classes: 12
-  debug: True
   checkpoint: '20_epoch_47.08%_with_val.pth'
   test_batch_size: 16  
+
+DeepLabV3Plus:
+  seed: 42
+  backbone: 'timm-efficientnet-b2'
+  model_arc: 'DeepLabV3Plus'
+  num_classes: 12
+  checkpoint: '17_epoch_46.84%_with_val.pth'
+  test_batch_size: 16  
+
+DeepLabV3:
+  seed: 42
+  backbone: 'timm-efficientnet-b2'
+  model_arc: 'DeepLabV3'
+  num_classes: 12
+  checkpoint: ''
+  test_batch_size: 16

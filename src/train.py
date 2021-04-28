@@ -7,9 +7,10 @@ from tqdm import tqdm
 from madgrad import MADGRAD
 from torchsummary import summary as summary_
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torchvision import models
+from torchvision.models.segmentation.deeplabv3 import DeepLabHead
 from importlib import import_module
 
-from . import lovasz_losses as L
 from .utils import AverageMeter, pixel_accuracy, mIoU, get_learning_rate
 from .losses import *
 from .model import CustomFCN8s, CustomFCN16s, CustomFCN32s
@@ -22,8 +23,6 @@ def train(cfg, train_loader, val_loader):
     OUTPUT_DIR = cfg.values.output_dir
     NUM_CLASSES = cfg.values.num_classes
 
-    LAMBDA = 5.0
-
     os.makedirs(os.path.join(OUTPUT_DIR, MODEL_ARC), exist_ok=True)
 
     # Set train arguments
@@ -35,7 +34,7 @@ def train(cfg, train_loader, val_loader):
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    model_module = getattr(import_module('segmentation_models_pytorch'), MODEL_ARC)
+    model_module = getattr(import_module('segmentation_models_pytorch'), MODEL_ARC)    
     
     model = model_module(
         encoder_name=BACKBONE,
@@ -44,6 +43,7 @@ def train(cfg, train_loader, val_loader):
     )
     
     model.to(device)
+    
     summary_(model, (3, 512, 512), train_batch_size)
 
     optimizer = MADGRAD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
@@ -66,10 +66,9 @@ def train(cfg, train_loader, val_loader):
             images, masks = images.to(device), masks.to(device)
 
             logits = model(images)
+            logits = logits
 
-            loss_1 = criterion(logits, masks)
-            loss_2 = L.lovasz_softmax(logits.argmax(dim=1), masks, ignore=0)
-            loss = loss_1 + (loss_2 * LAMBDA)
+            loss = criterion(logits, masks)            
             
             acc = pixel_accuracy(logits, masks)
             m_iou = mIoU(logits, masks)       
@@ -105,10 +104,9 @@ def train(cfg, train_loader, val_loader):
                 images, masks = images.to(device), masks.to(device)
 
                 logits = model(images)
-                
-                loss_1 = criterion(logits, masks)
-                loss_2 = L.lovasz_softmax(logits.argmax(dim=1), masks, ignore=0)
-                loss = loss_1 + (loss_2 * LAMBDA)
+                logits = logits
+
+                loss = criterion(logits, masks)
 
                 acc = pixel_accuracy(logits, masks)
                 m_iou = mIoU(logits, masks)                 
@@ -126,7 +124,7 @@ def train(cfg, train_loader, val_loader):
         best_score = max(val_mIoU_values.avg, best_score)
 
         if is_best:
-            torch.save(model.state_dict(), os.path.join(OUTPUT_DIR, MODEL_ARC, f'{epoch + 1}_epoch_{best_score * 100.0:.2f}%_with_val.pth'))
+            torch.save(model.state_dict(), os.path.join(OUTPUT_DIR, MODEL_ARC, f'{epoch + 1}_epoch_{best_score * 100.0:.2f}%.pth'))
         
         scheduler.step(val_loss_values.avg)
 

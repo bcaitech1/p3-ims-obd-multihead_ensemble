@@ -3,9 +3,15 @@ import cv2
 import argparse
 import numpy as np
 import pandas as pd
+import multiprocessing as mp
 import albumentations
 import albumentations.pytorch
 import segmentation_models_pytorch as smp
+import torch.nn as nn
+import pydensecrf.densecrf as dcrf
+import pydensecrf.utils as utils
+import torch.nn.functional as F
+
 
 from importlib import import_module
 from prettyprinter import cpprint
@@ -15,6 +21,35 @@ import torch
 
 from src.utils import seed_everything, YamlConfigManager, get_dataloader
 from src.model import *
+
+def dense_crf_wrapper(args):
+    return dense_crf(args[0], args[1])
+
+def dense_crf(img, output_probs):
+    MAX_ITER = 10
+    POS_W = 3
+    POS_XY_STD = 1
+    Bi_W = 4
+    Bi_XY_STD = 67
+    Bi_RGB_STD = 3
+
+    c = output_probs.shape[0]
+    h = output_probs.shape[1]
+    w = output_probs.shape[2]
+
+    U = utils.unary_from_softmax(output_probs)
+    U = np.ascontiguousarray(U)
+
+    img = np.ascontiguousarray(img)
+
+    d = dcrf.DenseCRF2D(w, h, c)
+    d.setUnaryEnergy(U)
+    d.addPairwiseGaussian(sxy=POS_XY_STD, compat=POS_W)
+    d.addPairwiseBilateral(sxy=Bi_XY_STD, srgb=Bi_RGB_STD, rgbim=img, compat=Bi_W)
+
+    Q = d.inference(MAX_ITER)
+    Q = np.array(Q).reshape((c, h, w))
+    return Q
 
 
 def test(cfg):    
@@ -66,7 +101,14 @@ def test(cfg):
 
             # inference (512 x 512)
             outs = model(torch.stack(imgs).to(device))
-            oms = torch.argmax(outs.squeeze(), dim=1).detach().cpu().numpy()
+            probs = F.softmax(outs, dim=1).data.cpu().numpy()
+            
+            pool = mp.Pool(mp.cpu_count())
+            images = torch.stack(imgs).data.cpu().numpy().astype(np.uint8).transpose(0, 2, 3, 1)
+            probs = np.array(pool.map(dense_crf_wrapper, zip(images, probs)))
+            pool.close()
+            
+            oms = np.argmax(probs, axis=1)
             
             # resize (256 x 256)
             temp_mask = []

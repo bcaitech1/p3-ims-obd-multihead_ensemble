@@ -12,3 +12,33 @@ base:
     log_intervals: 10         
   val_args:    
     val_batch_size: 16
+
+DeepLabV3Plus:
+  seed: 42
+  backbone: 'timm-efficientnet-b2'
+  model_arc: 'DeepLabV3Plus'
+  num_classes: 12
+  output_dir: './results/'
+  train_args:
+    num_epochs: 20
+    train_batch_size: 16
+    lr: 0.001
+    weight_decay: 0.000006
+    log_intervals: 10         
+  val_args:    
+    val_batch_size: 16
+
+DeepLabV3:
+  seed: 42
+  backbone: 'timm-efficientnet-b2'
+  model_arc: 'DeepLabV3'
+  num_classes: 12
+  output_dir: './results/'
+  train_args:
+    num_epochs: 20
+    train_batch_size: 16
+    lr: 0.001
+    weight_decay: 0.00004
+    log_intervals: 10         
+  val_args:    
+    val_batch_size: 16

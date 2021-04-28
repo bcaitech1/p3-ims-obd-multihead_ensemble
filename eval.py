@@ -12,13 +12,8 @@ from prettyprinter import cpprint
 from tqdm import tqdm
 
 import torch
-from torch.utils.data import DataLoader
-from torchvision.models import vgg16
 
 from src.utils import seed_everything, YamlConfigManager, get_dataloader
-from src.utils import make_cat_df
-from src.utils import cls_colors
-from src.dataset import RecycleTrashDataset
 from src.model import *
 
 
@@ -110,11 +105,11 @@ def make_submission(cfg):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config_file_path', type=str, default='./config/eval_config.yml')
-    parser.add_argument('--config', type=str, default='base')
+    parser.add_argument('--eval_config_file_path', type=str, default='./config/eval_config.yml')
+    parser.add_argument('--eval_config', type=str, default='base')
     
     args = parser.parse_args()
-    cfg = YamlConfigManager(args.config_file_path, args.config)
+    cfg = YamlConfigManager(args.eval_config_file_path, args.eval_config)
     cpprint(cfg.values, sort_dict_keys=False)
     print('\n')
     make_submission(cfg)

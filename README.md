@@ -1,10 +1,10 @@
 Baseline-v2
 ===
 ## Usage
-`cd ~`
-`mkdir baselinev2`
-`cd baselinev2`
-`git clone -b vim_hjk --single-branch https://github.com/bcaitech1/p3-ims-obd-multihead_ensemble.git`
+- `cd ~`
+- `mkdir baselinev2`
+- `cd baselinev2`
+- `git clone -b vim_hjk --single-branch https://github.com/bcaitech1/p3-ims-obd-multihead_ensemble.git`
 ### Train
 - `python main.py --config "your config"`
 

@@ -1,9 +1,9 @@
 base:
   seed: 42
-  backbone: 'timm-efficientnet-b1'
+  backbone: 'timm-efficientnet-b2'
   model_arc: 'PAN'
   num_classes: 12
-  output_dir: '../results/'
+  output_dir: './results/'
   train_args:
     num_epochs: 20
     train_batch_size: 16

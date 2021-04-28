@@ -15,8 +15,8 @@ from src.utils import seed_everything
 from src.utils import make_cat_df
 from src.utils import cls_colors
 from src.dataset import SegmentationDataset
-from src.models import *
 
+import torch.nn.functional as F
 
 def main():
     parser = argparse.ArgumentParser(description="MultiHead Ensemble Team")
@@ -63,6 +63,22 @@ def main():
             in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
             classes=12,  # model output channels (number of classes in your dataset)
         )
+    elif args.model_type == 'deeplabv3':
+        model = smp.DeepLabV3(
+            encoder_name='efficientnet-b0',
+            encoder_weights='imagenet',
+            in_channels=3,
+            classes=12
+        )
+    elif args.model_type == 'hrnet_ocr':
+        import yaml
+        from src.models.hrnet_seg import get_seg_model
+
+        config_path = './src/configs/hrnet_seg_ocr.yaml'
+        with open(config_path) as f:
+            cfg = yaml.load(f)
+            cfg['MODEL']['PRETRAINED'] = ''
+        model = get_seg_model(cfg)
 
     model = model.to(device)
     model.load_state_dict(torch.load(os.path.join("./ckpts", args.ckpt)))
@@ -79,6 +95,12 @@ def main():
 
             # inference (512 x 512)
             preds = model(imgs.to(device))
+            if isinstance(preds, list):
+                aux_preds, preds = preds
+                ph, pw = preds.size(2), preds.size(3)
+                if ph != 256 or pw != 256:
+                    preds = F.interpolate(input=preds, size=(
+                        256, 256), mode='bilinear', align_corners=True)
             oms = torch.argmax(preds.squeeze(), dim=1).detach().cpu().numpy()
 
             if args.debug:
@@ -86,6 +108,9 @@ def main():
                 if not os.path.exists(debug_path):
                     os.makedirs(debug_path)
 
+                ph, pw = preds.size(2), preds.size(3)
+                if ph != 512 or pw != 512:
+                    preds = F.interpolate(input=preds, size=(512, 512), mode='bilinear', align_corners=True)
                 pred_masks = torch.argmax(preds.squeeze(), dim=1).detach().cpu().numpy()
                 for idx, file_name in enumerate(file_names):
                     pred_mask = pred_masks[idx]
@@ -105,12 +130,12 @@ def main():
             temp_mask = []
             temp_images = imgs.permute(0, 2, 3, 1).detach().cpu().numpy()
             for img, mask in zip(temp_images, oms):
-                transformed = resize(image=img, mask=mask)
-                mask = transformed['mask']
+                if mask.shape[0] != 256 or mask.shape[1] != 256:
+                    transformed = resize(image=img, mask=mask)
+                    mask = transformed['mask']
                 temp_mask.append(mask)
 
             oms = np.array(temp_mask)
-
             oms = oms.reshape([oms.shape[0], size * size]).astype(int)
             preds_array = np.vstack((preds_array, oms))
 

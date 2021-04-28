@@ -20,7 +20,6 @@ class SegmentationDataset(Dataset):
     def __init__(self, data_dir, cat_df, mode='train', num_cls=12, transform=None):
         super().__init__()
         self.mode = mode
-        self.type = type
         self.num_cls = num_cls
         self.transform = transform
         self.coco = COCO(data_dir)
@@ -34,7 +33,7 @@ class SegmentationDataset(Dataset):
 
         # cv2 를 활용하여 image 불러오기
         images = cv2.imread(os.path.join(self.ds_path, image_infos['file_name']))
-        images = cv2.cvtColor(images, cv2.COLOR_BGR2RGB).astype(np.float32)
+        images = cv2.cvtColor(images, cv2.COLOR_BGR2RGB)
 
         if (self.mode in ('train', 'valid')):
             ann_ids = self.coco.getAnnIds(imgIds=image_infos['id'])

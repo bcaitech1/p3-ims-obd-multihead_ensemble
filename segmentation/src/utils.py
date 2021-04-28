@@ -2,12 +2,14 @@ import os
 import cv2
 import json
 import random
+import collections
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 import torch
+import torch.nn.functional as F
 
 
 num_cls = 12
@@ -82,40 +84,42 @@ import numpy as np
 
 def _fast_hist(label_true, label_pred, n_class):
     mask = (label_true >= 0) & (label_true < n_class)
-    hist = np.bincount(
-        n_class * label_true[mask].astype(int) +
-        label_pred[mask], minlength=n_class ** 2).reshape(n_class, n_class)
+    hist = np.bincount(n_class * label_true[mask].astype(int) + label_pred[mask],
+                        minlength=n_class ** 2).reshape(n_class, n_class)
     return hist
 
 
-def label_accuracy_score(label_trues, label_preds, n_class):
-    """Returns accuracy score evaluation result.
-      - overall accuracy
-      - mean accuracy
-      - mean IU
-      - fwavacc
+def label_accuracy_score(hist):
+    """
+    Returns accuracy score evaluation result.
+      - [acc]: overall accuracy
+      - [acc_cls]: mean accuracy
+      - [mean_iu]: mean IU
+      - [fwavacc]: fwavacc
+    """
+    acc = np.diag(hist).sum() / hist.sum()
+    with np.errstate(divide='ignore', invalid='ignore'):
+        acc_cls = np.diag(hist) / hist.sum(axis=1)
+    acc_cls = np.nanmean(acc_cls)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        iu = np.diag(hist) / (hist.sum(axis=1) + hist.sum(axis=0) - np.diag(hist))
+    mean_iu = np.nanmean(iu)
+
+    freq = hist.sum(axis=1) / hist.sum()
+    fwavacc = (freq[freq > 0] * iu[freq > 0]).sum()
+    return acc, acc_cls, mean_iu, fwavacc
+
+
+def add_hist(hist, label_trues, label_preds, n_class):
+    """
+        stack hist(confusion matrix)
     """
 
-    if len(label_trues.shape) == 3:
-        label_preds = torch.argmax(label_preds.squeeze(), dim=1)
-        label_trues = label_trues.detach().cpu().numpy()
-        label_preds = label_preds.detach().cpu().numpy()
+    for lt, lp in zip(label_trues, label_preds):
+        hist += _fast_hist(lt.flatten(), lp.flatten(), n_class)
 
-        hist = np.zeros((n_class, n_class))
-        for lt, lp in zip(label_trues, label_preds):
-            hist += _fast_hist(lt.flatten(), lp.flatten(), n_class)
-        acc = np.diag(hist).sum() / hist.sum()
-        with np.errstate(divide='ignore', invalid='ignore'):
-            acc_cls = np.diag(hist) / hist.sum(axis=1)
-        acc_cls = np.nanmean(acc_cls)
-        with np.errstate(divide='ignore', invalid='ignore'):
-            iu = np.diag(hist) / (
-                hist.sum(axis=1) + hist.sum(axis=0) - np.diag(hist)
-            )
-        mean_iu = np.nanmean(iu)
-        freq = hist.sum(axis=1) / hist.sum()
-        fwavacc = (freq[freq > 0] * iu[freq > 0]).sum()
-        return acc, acc_cls, mean_iu, fwavacc
+    return hist
 
 
 def save_model(model, version, save_type='loss'):
@@ -127,12 +131,42 @@ def save_model(model, version, save_type='loss'):
     torch.save(model.state_dict(), save_dir)
 
 
-def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, logger, device, debug=True):
+def rand_bbox(size, lam, mask):
+    W = size[2]
+    H = size[3]
+    cut_rat = np.sqrt(1. - lam)
+
+    # uniform
+    hs, ws = (mask > 0).nonzero(as_tuple=True)
+    try:
+        hmin, hmax = hs.min().item(), hs.max().item()
+        wmin, wmax = ws.min().item(), ws.max().item()
+
+        cut_w = np.int((wmax - wmin) * cut_rat)
+        cut_h = np.int((hmax - hmin) * cut_rat)
+
+        cx = np.random.randint(wmin, wmax)
+        cy = np.random.randint(hmin, hmax)
+    except Exception as e:
+        cut_w = np.int(W * cut_rat)
+        cut_h = np.int(H * cut_rat)
+
+        cx = np.random.randint(W)
+        cy = np.random.randint(H)
+
+    bbx1 = np.clip(cx - cut_w // 2, 0, W)
+    bby1 = np.clip(cy - cut_h // 2, 0, H)
+    bbx2 = np.clip(cx + cut_w // 2, 0, W)
+    bby2 = np.clip(cy + cut_h // 2, 0, H)
+    return bbx1, bby1, bbx2, bby2
+
+
+def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, logger, device, beta=0.0, debug=True):
     cnt = 1
 
     model.train()
-    trn_mIoU = []
     trn_losses = []
+    hist = np.zeros((12, 12))
     logger.info(f"\nTrain on Epoch {epoch+1}")
     with tqdm(trn_dl, total=len(trn_dl), unit='batch') as trn_bar:
         for batch, sample in enumerate(trn_bar):
@@ -142,25 +176,54 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, logger, devi
             images, masks = sample['image'], sample['mask']
             images, masks = images.to(device), masks.to(device).long()
 
+            if beta > 0:
+                lam = np.random.beta(beta, beta)
+                rand_index = torch.randperm(images.size()[0]).cuda()
+                for image_idx, rand_idx in enumerate(rand_index):
+                    bbx1, bby1, bbx2, bby2 = rand_bbox(images.size(), lam, masks[rand_idx])
+                    images[image_idx, :, bbx1:bbx2, bby1:bby2] = images[rand_idx, :, bbx1:bbx2, bby1:bby2]
+                    masks[image_idx, bbx1:bbx2, bby1:bby2] = masks[rand_idx, bbx1:bbx2, bby1:bby2]
+
+
+            aux_preds = None
             preds = model(images)
+            if isinstance(preds, collections.OrderedDict):
+                preds = preds['out']
+            elif isinstance(preds, list):
+                aux_preds, preds = preds
+                ph, pw = preds.size(2), preds.size(3)
+                h, w = masks.size(1), masks.size(2)
+                if ph != h or pw != w:
+                    preds = F.interpolate(input=preds, size=(
+                        h, w), mode='bilinear', align_corners=True)
+                    aux_preds = F.interpolate(input=aux_preds, size=(
+                        h, w), mode='bilinear', align_corners=True)
+
+
             loss = criterion(preds, masks)
+            if aux_preds is not None:
+                loss += 0.4 * criterion(aux_preds, masks)
+
             loss.backward()
             optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
 
-            mIoU = label_accuracy_score(masks, preds, n_class=12)[2]
-            trn_mIoU.append(mIoU)
+            preds = torch.argmax(preds, dim=1).detach().cpu().numpy()
+            hist = add_hist(hist, masks.detach().cpu().numpy(), preds, n_class=12)
+            trn_mIoU = label_accuracy_score(hist)[2]
 
             trn_losses.append(loss.item())
             if (batch+1) % (int(len(trn_dl)//10)) == 0:
-                logger.info(f'Train Epoch {epoch+1} ==>  Batch [{str(batch+1).zfill(len(str(len(trn_dl))))}/{len(trn_dl)}]  |  Loss: {np.mean(trn_losses):.5f}  |  mIoU: {np.mean(trn_mIoU):.5f}')
+                logger.info(f'Train Epoch {epoch+1} ==>  Batch [{str(batch+1).zfill(len(str(len(trn_dl))))}/{len(trn_dl)}]  |  Loss: {np.mean(trn_losses):.5f}  |  mIoU: {trn_mIoU:.5f}')
 
             trn_bar.set_postfix(trn_loss=np.mean(trn_losses),
-                                trn_mIoU=np.mean(trn_mIoU))
+                                trn_mIoU=trn_mIoU)
 
 
     model.eval()
-    val_mIoU = []
     val_losses = []
+    hist = np.zeros((12, 12))
     logger.info(f"\nValid on Epoch {epoch+1}")
     with torch.no_grad():
         with tqdm(val_dl, total=len(val_dl), unit='batch') as val_bar:
@@ -171,6 +234,16 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, logger, devi
                 images, masks = images.to(device), masks.to(device).long()
 
                 preds = model(images)
+                if isinstance(preds, collections.OrderedDict):
+                    preds = preds['out']
+                elif isinstance(preds, list):
+                    _, preds = preds
+                    ph, pw = preds.size(2), preds.size(3)
+                    h, w = masks.size(1), masks.size(2)
+                    if ph != h or pw != w:
+                        preds = F.interpolate(input=preds, size=(
+                            h, w), mode='bilinear', align_corners=True)
+
                 loss = criterion(preds, masks)
                 val_losses.append(loss.item())
 
@@ -195,15 +268,15 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, logger, devi
                         cv2.imwrite(os.path.join(debug_path, f"{cnt}.jpg"), ori_image)
                         cnt += 1
 
-
-                mIoU = label_accuracy_score(masks, preds, n_class=12)[2]
-                val_mIoU.append(mIoU)
+                preds = torch.argmax(preds, dim=1).detach().cpu().numpy()
+                hist = add_hist(hist, masks.detach().cpu().numpy(), preds, n_class=12)
+                val_mIoU = label_accuracy_score(hist)[2]
 
                 if (batch + 1) % (int(len(trn_dl) // 10)) == 0:
                     logger.info(
-                        f'Valid Epoch {epoch+1} ==>  Batch [{str(batch+1).zfill(len(str(len(val_dl))))}/{len(val_dl)}]  |  Loss: {np.mean(val_losses):.5f}  |  mIoU: {np.mean(val_mIoU):.5f}')
+                        f'Valid Epoch {epoch+1} ==>  Batch [{str(batch+1).zfill(len(str(len(val_dl))))}/{len(val_dl)}]  |  Loss: {np.mean(val_losses):.5f}  |  mIoU: {val_mIoU:.5f}')
 
                 val_bar.set_postfix(val_loss=np.mean(val_losses),
-                                    val_mIoU=np.mean(val_mIoU))
+                                    val_mIoU=val_mIoU)
 
-    return np.mean(trn_losses), np.mean(trn_mIoU), np.mean(val_losses), np.mean(val_mIoU)
+    return np.mean(trn_losses), trn_mIoU, np.mean(val_losses), val_mIoU

@@ -1,24 +1,20 @@
 import os
-import wandb
 import logging
 import argparse
 import numpy as np
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-import torch
 import torch.optim as optim
 import segmentation_models_pytorch as smp
-from segmentation_models_pytorch.utils.losses import DiceLoss, BCEWithLogitsLoss
 
 from src.utils import seed_everything
 from src.utils import make_cat_df
 from src.utils import train_valid
 from src.utils import save_model
 from src.dataset import SegmentationDataset
-from src.models import FCN8s
+from src.models.fcn8s import FCN8s
 from src.losses import *
-
 
 from torch.utils.data import DataLoader
 from torchvision.models import vgg16
@@ -29,11 +25,12 @@ def main():
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--trn_ratio', default=0.0, type=float)
     parser.add_argument('--batch_size', default=2, type=int)
-    parser.add_argument('--lr', default=1e-4, type=float)
-    parser.add_argument('--decay', default=1e-6, type=float)
+    parser.add_argument('--lr', default=1e-3, type=float)
+    parser.add_argument('--decay', default=1e-7, type=float)
     parser.add_argument('--epochs', default=20, type=int)
-    parser.add_argument('--version', default='v1', type=str)
+    parser.add_argument('--version', default='test', type=str)
     parser.add_argument('--model_type', default='fcn8s', type=str)
+    parser.add_argument('--cutmix_beta', default=1.0, type=float)
 
 
     args = parser.parse_args()
@@ -51,10 +48,20 @@ def main():
 
     # define transform
     trn_tfms = A.Compose([
-        A.HorizontalFlip(p=0.7),
-        A.VerticalFlip(p=0.5),
-        A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.15, rotate_limit=20),
-
+        # A.RandomCrop(384, 384),
+        # A.HorizontalFlip(p=0.5),
+        # A.VerticalFlip(p=0.5),
+        # A.RandomRotate90(p=0.5),
+        #
+        # A.RandomBrightnessContrast(p=0.5),
+        # A.RandomGamma(p=0.5),
+        #
+        # A.OneOf([
+        #     A.ElasticTransform(p=1, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03),
+        #     A.GridDistortion(p=1),
+        #     A.OpticalDistortion(distort_limit=1, shift_limit=0.5, p=1),
+        # ], p=0.6),
+        #
         # A.OneOf([
         #     A.RGBShift(p=1.0),
         #     A.HueSaturationValue(p=1.0),
@@ -95,12 +102,12 @@ def main():
     trn_dl = DataLoader(dataset=trn_ds,
                         batch_size=args.batch_size,
                         shuffle=True,
-                        num_workers=3)
+                        num_workers=4)
 
     val_dl = DataLoader(dataset=val_ds,
                         batch_size=args.batch_size,
                         shuffle=False,
-                        num_workers=3)
+                        num_workers=4)
 
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -121,11 +128,36 @@ def main():
             in_channels=3,
             classes=12
         )
+    elif args.model_type == 'torch_deeplab':
+        import torchvision
+        model = torchvision.models.segmentation.deeplabv3_resnet50(pretrained=True, aux_loss=False)
+        classifier = list(model.classifier)
+        classifier[4] = nn.Conv2d(256, 12, kernel_size=(1, 1), stride=(1, 1))
+        model.classifier = nn.Sequential(*classifier)
+    elif args.model_type == 'hrnet_ocr':
+        import yaml
+        from src.models.hrnet_seg import get_seg_model
+
+        config_path = './src/configs/hrnet_seg_ocr.yaml'
+        with open(config_path) as f:
+            cfg = yaml.load(f)
+        model = get_seg_model(cfg)
 
     model = model.to(device)
     optimizer = optim.AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.decay)
+    # total_steps = int(len(trn_dl)*args.epochs)
+    # warup_steps = int(total_steps*0.15)
+    # scheduler = CosineAnnealingWarmupRestarts(optimizer,
+    #                                           first_cycle_steps=int(len(trn_dl)*args.epochs), cycle_mult=1.0,
+    #                                           max_lr=0.1, min_lr=0.0001,
+    #                                           warmup_steps=warup_steps, gamma=1.0)
+    # scheduler = optim.lr_scheduler.OneCycleLR(optimizer, max_lr=1e-3, steps_per_epoch=len(trn_dl), epochs=args.epochs, anneal_strategy='cos')
+    scheduler = None
+
     # criterion = nn.CrossEntropyLoss()
     criterion = DiceCELoss()
+    # criterion = IoULoss()
+    # criterion = FocalLoss()
 
     logger = logging.getLogger("Segmentation")
     logger.setLevel(logging.INFO)
@@ -139,7 +171,9 @@ def main():
     best_loss = float("INF")
     best_mIoU = 0
     for epoch in range(args.epochs):
-        trn_loss, trn_mIoU, val_loss, val_mIoU = train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, logger, device)
+        trn_loss, trn_mIoU, val_loss, val_mIoU = train_valid(epoch, model, trn_dl, val_dl,
+                                                             criterion, optimizer, scheduler,
+                                                             logger, device, args.cutmix_beta)
 
         if best_loss > val_loss:
             logger.info(f"Best loss {best_loss:.5f} -> {val_loss:.5f}")

@@ -1,14 +1,6 @@
 Baseline-v2
 ===
 ## Usage
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
----
->>>>>>> ac179e19fad2a264fcb4392d629c6b77a4cf7c1c
-=======
----
->>>>>>> ac179e19fad2a264fcb4392d629c6b77a4cf7c1c
 ### Train
 - `python main.py --config "your config"`
 

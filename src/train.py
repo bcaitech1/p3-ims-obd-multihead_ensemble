@@ -1,35 +1,60 @@
 import os
+import wandb
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import segmentation_models_pytorch
 
 from tqdm import tqdm
+from glob import glob
 from madgrad import MADGRAD
+from adamp import AdamP
+from torch.optim import AdamW
 from torchsummary import summary as summary_
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torchvision import models
-from torchvision.models.segmentation.deeplabv3 import DeepLabHead
 from importlib import import_module
 
-from .utils import AverageMeter, pixel_accuracy, mIoU, get_learning_rate
-from .losses import *
+from .losses import OnlineHardExampleMiningLoss, DiceLoss
+from .utils import AverageMeter, pixel_accuracy, mIoU, get_learning_rate, CosineAnnealingWarmupRestarts, denormalize_image
+from . import lovasz_losses as L
 from .model import CustomFCN8s, CustomFCN16s, CustomFCN32s
 
 
 def train(cfg, train_loader, val_loader):
     # Set Config
-    BACKBONE=cfg.values.backbone
+    BACKBONE = cfg.values.backbone
+    BACKBONE_WEIGHT = cfg.values.backbone_weight
     MODEL_ARC = cfg.values.model_arc
     OUTPUT_DIR = cfg.values.output_dir
     NUM_CLASSES = cfg.values.num_classes
 
-    os.makedirs(os.path.join(OUTPUT_DIR, MODEL_ARC), exist_ok=True)
+    LAMBDA = 0.75
+
+    SAVE_PATH = os.path.join(OUTPUT_DIR, MODEL_ARC)
+
+    class_labels ={
+        0: 'Background',
+        1: 'UNKNOWN',
+        2: 'General trash',
+        3: 'Paper',
+        4: 'Paper pack',
+        5: 'Metal',
+        6: 'Glass',
+        7: 'Plastic',
+        8: 'Styrofoam',
+        9: 'Plastic bag',
+        10: 'Battery',
+        11: 'Clothing'
+    }
+
+    os.makedirs(SAVE_PATH, exist_ok=True)
 
     # Set train arguments
     num_epochs = cfg.values.train_args.num_epochs
     train_batch_size = cfg.values.train_args.train_batch_size
     log_intervals = cfg.values.train_args.log_intervals
-    learning_rate = cfg.values.train_args.lr
+    max_lr = cfg.values.train_args.max_lr
+    min_lr = cfg.values.train_args.min_lr
     weight_decay = cfg.values.train_args.weight_decay
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -38,17 +63,30 @@ def train(cfg, train_loader, val_loader):
     
     model = model_module(
         encoder_name=BACKBONE,
+        encoder_weights=BACKBONE_WEIGHT,
         in_channels=3,
         classes=NUM_CLASSES
     )
     
     model.to(device)
     
-    summary_(model, (3, 512, 512), train_batch_size)
+    # summary_(model, (3, 512, 512), train_batch_size)
 
-    optimizer = MADGRAD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    scheduler = ReduceLROnPlateau(optimizer, 'min')
+    optimizer = MADGRAD(model.parameters(), lr=max_lr, weight_decay=weight_decay)
+    first_cycle_steps = len(train_loader) * num_epochs // (num_epochs // 10)
+    scheduler = CosineAnnealingWarmupRestarts(
+        optimizer, 
+        first_cycle_steps=first_cycle_steps, 
+        cycle_mult=1.0, 
+        max_lr=max_lr, 
+        min_lr=min_lr, 
+        warmup_steps=int(first_cycle_steps * 0.25), 
+        gamma=0.5
+    )
     criterion = nn.CrossEntropyLoss()
+    criterion_2 = DiceLoss()
+
+    wandb.watch(model)
 
     best_score = 0.
 
@@ -66,9 +104,11 @@ def train(cfg, train_loader, val_loader):
             images, masks = images.to(device), masks.to(device)
 
             logits = model(images)
-            logits = logits
 
-            loss = criterion(logits, masks)            
+            loss_1 = criterion(logits, masks)
+            loss_2 = criterion_2(logits, masks)       
+
+            loss = loss_1 * (1 - LAMBDA) + loss_2 * LAMBDA
             
             acc = pixel_accuracy(logits, masks)
             m_iou = mIoU(logits, masks)       
@@ -81,32 +121,45 @@ def train(cfg, train_loader, val_loader):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            scheduler.step()
+
+            wandb.log({
+                'Learning rate' : get_learning_rate(optimizer)[0],
+                'Train Loss value' : loss_values.val,
+                'Train Pixel Accuracy value' : accuracy.val * 100.0,
+                'Train mean IoU value' : mIoU_values.val * 100.0,
+            })
 
             if i % log_intervals == 0:
                 tqdm.write(f'Epoch : [{epoch + 1}/{num_epochs}][{i}/{len(train_loader)}] || '
-                           f'LR : {get_learning_rate(optimizer)[0]} ||'
+                           f'LR : {get_learning_rate(optimizer)[0]:.6e} ||'
                            f'Train Loss : {loss_values.val:.4f} ({loss_values.avg:.4f}) || '
                            f'Train Pixel Acc : {accuracy.val * 100.0:.3f}% ({accuracy.avg * 100.0:.4f}%) || '
                            f'Train mean IoU : {mIoU_values.val * 100.0:.3f}% ({mIoU_values.avg * 100.0:.3f}%)')
-
-
+            
+        
         with torch.no_grad():
             model.eval()
 
             val_loss_values = AverageMeter()
             val_mIoU_values = AverageMeter()
             val_accuracy = AverageMeter()            
+            
+            example_images = []
 
             for i, (images, masks, _) in enumerate(tqdm(val_loader, desc=f'Validation')):
+                
                 images = torch.stack(images)
                 masks = torch.stack(masks).long()  
 
                 images, masks = images.to(device), masks.to(device)
 
                 logits = model(images)
-                logits = logits
 
-                loss = criterion(logits, masks)
+                loss_1 = criterion(logits, masks)
+                loss_2 = criterion_2(logits, masks)  
+
+                loss = loss_1 * (1 - LAMBDA) + loss_2 * LAMBDA
 
                 acc = pixel_accuracy(logits, masks)
                 m_iou = mIoU(logits, masks)                 
@@ -114,6 +167,27 @@ def train(cfg, train_loader, val_loader):
                 val_loss_values.update(loss.item(), images.size(0))
                 val_mIoU_values.update(m_iou.item(), images.size(0))
                 val_accuracy.update(acc.item(), images.size(0))
+
+                inputs_np = torch.clone(images).detach().cpu().permute(0, 2, 3, 1).numpy()
+                inputs_np = denormalize_image(inputs_np, mean=(0.461, 0.440, 0.419), std=(0.211, 0.208, 0.216))
+                
+                example_images.append(wandb.Image(inputs_np[0], masks={
+                    "predictions" : {
+                        "mask_data" : logits.argmax(1)[0].detach().cpu().numpy(),
+                        "class_labels" : class_labels
+                    },
+                    "ground-truth" : {
+                        "mask_data" : masks[0].detach().cpu().numpy(),
+                        "class_labels" : class_labels
+                    }
+                }))
+
+        wandb.log({
+            'Example Image' : example_images,
+            'Validation Loss average': val_loss_values.avg,
+            'Validation Pixel Accuracy average' : val_accuracy.avg * 100.0,
+            'Validation mean IoU average' : val_mIoU_values.avg * 100.0
+        })
 
         tqdm.write(f'Epoch : [{epoch + 1}/{num_epochs}] || '
                    f'Val Loss : {val_loss_values.avg:.4f} || '
@@ -124,8 +198,9 @@ def train(cfg, train_loader, val_loader):
         best_score = max(val_mIoU_values.avg, best_score)
 
         if is_best:
-            torch.save(model.state_dict(), os.path.join(OUTPUT_DIR, MODEL_ARC, f'{epoch + 1}_epoch_{best_score * 100.0:.2f}%.pth'))
+            if len(glob(SAVE_PATH + '/*.pth')) > 2:
+                os.remove(glob(SAVE_PATH + '/*.pth')[0])
+            torch.save(model.state_dict(), os.path.join(SAVE_PATH, f'{epoch + 1}_epoch_{best_score * 100.0:.2f}%.pth'))
         
-        scheduler.step(val_loss_values.avg)
 
     return best_score

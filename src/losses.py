@@ -9,34 +9,19 @@ class DiceLoss(nn.Module):
 
     def forward(self, inputs, targets, smooth=1):
         # flatten label and prediction tensors
-        inputs = inputs.view(-1)
-        targets = targets.view(-1)
+        num_classes = inputs.size(1)
+        true_1_hot = torch.eye(num_classes)[targets]
 
-        intersection = (inputs * targets).sum()
-        dice = (2. * intersection + smooth) / (inputs.sum() + targets.sum() + smooth)
+        true_1_hot = true_1_hot.permute(0, 3, 1, 2).float()
+        probas = F.softmax(inputs, dim=1)
+
+        true_1_hot = true_1_hot.type(inputs.type())
+        dims = (0,) + tuple(range(2, targets.ndimension()))
+        intersection = torch.sum(probas * true_1_hot, dims)
+        cardinality = torch.sum(probas + true_1_hot, dims)
+        dice = ((2. * intersection + smooth) / (cardinality + smooth)).mean()
 
         return 1 - dice
-
-
-class DiceBCELoss(nn.Module):
-    def __init__(self, weight=None, size_average=True):
-        super(DiceBCELoss, self).__init__()
-
-    def forward(self, inputs, targets, smooth=1):
-        
-        #comment out if your model contains a sigmoid or equivalent activation layer
-        inputs = F.sigmoid(inputs)       
-        
-        #flatten label and prediction tensors
-        inputs = inputs.view(-1)
-        targets = targets.view(-1)
-        
-        intersection = (inputs * targets).sum()                            
-        dice_loss = 1 - (2.*intersection + smooth)/(inputs.sum() + targets.sum() + smooth)  
-        BCE = F.binary_cross_entropy(inputs, targets, reduction='mean')
-        Dice_BCE = BCE + dice_loss
-        
-        return Dice_BCE
 
 
 class IoULoss(nn.Module):
@@ -64,24 +49,21 @@ class IoULoss(nn.Module):
 
 
 class FocalLoss(nn.Module):
-    def __init__(self, alpha=0.5, gamma=2, weight=None, size_average=True):
+    def __init__(self, gamma=2, alpha=.25, eps=1e-7, weights=None):
         super(FocalLoss, self).__init__()
 
         self.alpha = alpha
         self.gamma = gamma
-        self.weight = weight
+        self.eps = eps
+        self.weight = weights
 
-    def forward(self, inputs, targets):
-        log_prob = F.log_softmax(inputs, dim=1)
-        prob = torch.exp(log_prob)
-        focal_loss = F.nll_loss(
-            self.alpha * ((1 - prob) ** self.gamma) * log_prob,
-            targets,
-            weight=self.weight,
-            reduction='mean'
-        )
+    def forward(self, inp, tar):
+        logp = F.log_softmax(inp, dim=1)
+        ce_loss = F.nll_loss(logp, tar, weight=self.weight, reduction='none')
+        pt = torch.exp(-ce_loss)
 
-        return focal_loss
+        loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        return loss.mean()
 
 
 class TverskyLoss(nn.Module):
@@ -151,3 +133,23 @@ class ComboLoss(nn.Module):
         combo = (beta * weighted_ce) - ((1 - beta) * dice)
         
         return combo
+
+
+class OnlineHardExampleMiningLoss(nn.Module):
+    def __init__(self, top_k=0.7, weight=None, size_average=None,
+                    ignore_index=0, reduce=None, reduction='none'):
+        super(OnlineHardExampleMiningLoss, self).__init__()
+        
+        self.ignore_index = ignore_index
+        self.top_k = top_k
+        self.loss = nn.NLLLoss(weight=weight, 
+                    ignore_index=ignore_index, reduction='none')
+
+    def forward(self, input, target):
+        loss = self.loss(F.log_softmax(input, dim=1), target)
+        
+        if self.top_k == 1:
+            return torch.mean(loss)
+        else:
+            valid_loss, idxs = torch.topk(loss, int(self.top_k * loss.size()[0]))    
+            return torch.mean(valid_loss)

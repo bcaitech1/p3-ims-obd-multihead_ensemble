@@ -1,10 +1,11 @@
 import os
 import cv2
-import math
-import numpy as np
 import argparse
+import numpy as np
 import albumentations
 import albumentations.pytorch
+import multiprocessing as mp
+import torch.nn.functional as F
 import segmentation_models_pytorch as smp
 
 from importlib import import_module
@@ -12,13 +13,14 @@ from prettyprinter import cpprint
 
 import torch
 
-from src.utils import seed_everything, YamlConfigManager, get_dataloader
+from src.utils import seed_everything, YamlConfigManager, get_dataloader, dense_crf_wrapper
 from src.model import *
 
 
 def inference(cfg, limit):    
     SEED = cfg.values.seed    
     BACKBONE = cfg.values.backbone
+    BACKBONE_WEIGHT = cfg.values.backbone_weight
     MODEL_ARC = cfg.values.model_arc
     NUM_CLASSES = cfg.values.num_classes
     SAVE_IMG_PATH = './prediction/'
@@ -39,7 +41,7 @@ def inference(cfg, limit):
 
     COLORS = np.vstack([[0, 0, 0], COLORS]).astype('uint8')
 
-    os.makedirs(os.path.join(SAVE_IMG_PATH, MODEL_ARC), exist_ok=True)
+    os.makedirs(os.path.join(SAVE_IMG_PATH, MODEL_ARC + 'CRF'), exist_ok=True)
 
     checkpoint = cfg.values.checkpoint
     test_batch_size = 1
@@ -66,6 +68,7 @@ def inference(cfg, limit):
 
     model = model_module(
         encoder_name=BACKBONE,
+        encoder_weights=BACKBONE_WEIGHT,
         in_channels=3,
         classes=NUM_CLASSES
     )
@@ -81,13 +84,20 @@ def inference(cfg, limit):
             image = test_transform(image=np.stack(imgs)[0])['image'].unsqueeze(0)
 
             outs = model(image.to(device))
-            oms = torch.argmax(outs.squeeze(), dim=0).detach().cpu().numpy()
-                        
+            probs = F.softmax(outs, dim=1).data.cpu().numpy()
+            
+            pool = mp.Pool(mp.cpu_count())
+            images = image.data.cpu().numpy().astype(np.uint8).transpose(0, 2, 3, 1)
+            probs = np.array(pool.map(dense_crf_wrapper, zip(images, probs)))
+            pool.close()
+            
+            oms = np.argmax(probs, axis=1).squeeze(0)
+
             org = np.stack(imgs)[0]
             mask = COLORS[oms]
             output = ((0.4 * org) + (0.6 * mask)).astype('uint8')
             
-            cv2.imwrite(os.path.join(SAVE_IMG_PATH, MODEL_ARC, f'{step}.jpg'), output)
+            cv2.imwrite(os.path.join(SAVE_IMG_PATH, MODEL_ARC + 'CRF', f'{step}.jpg'), output)
             
             if step % 10 == 0:
                 print(f'Progress({step + 1}/{LIMIT})...')
@@ -99,6 +109,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--eval_config_file_path', type=str, default='./config/eval_config.yml')
     parser.add_argument('--eval_config', type=str, default='base')
+    parser.add_argument('--crf', type=bool, default='True')
     parser.add_argument('--limit', type=str, default='all')
     
     args = parser.parse_args()

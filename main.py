@@ -1,5 +1,5 @@
 import os
-from albumentations.augmentations.transforms import Normalize
+from albumentations.augmentations.transforms import ElasticTransform, Normalize
 import torch
 import argparse
 import pandas as pd
@@ -25,11 +25,13 @@ def main(cfg):
 
     train_transform = albumentations.Compose([
         albumentations.Resize(512, 512),
+        albumentations.ElasticTransform(),
         albumentations.Normalize(mean=(0.461, 0.440, 0.419), std=(0.211, 0.208, 0.216)),
         albumentations.pytorch.transforms.ToTensorV2()])
 
     val_transform = albumentations.Compose([
         albumentations.Resize(512, 512),
+        albumentations.ElasticTransform(),
         albumentations.Normalize(mean=(0.461, 0.440, 0.419), std=(0.211, 0.208, 0.216)),
         albumentations.pytorch.transforms.ToTensorV2()])
 

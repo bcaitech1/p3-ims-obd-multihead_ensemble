@@ -8,8 +8,6 @@ import albumentations
 import albumentations.pytorch
 import segmentation_models_pytorch as smp
 import torch.nn as nn
-import pydensecrf.densecrf as dcrf
-import pydensecrf.utils as utils
 import torch.nn.functional as F
 
 
@@ -19,42 +17,14 @@ from tqdm import tqdm
 
 import torch
 
-from src.utils import seed_everything, YamlConfigManager, get_dataloader
+from src.utils import seed_everything, YamlConfigManager, get_dataloader, dense_crf_wrapper
 from src.model import *
-
-def dense_crf_wrapper(args):
-    return dense_crf(args[0], args[1])
-
-def dense_crf(img, output_probs):
-    MAX_ITER = 10
-    POS_W = 3
-    POS_XY_STD = 1
-    Bi_W = 4
-    Bi_XY_STD = 67
-    Bi_RGB_STD = 3
-
-    c = output_probs.shape[0]
-    h = output_probs.shape[1]
-    w = output_probs.shape[2]
-
-    U = utils.unary_from_softmax(output_probs)
-    U = np.ascontiguousarray(U)
-
-    img = np.ascontiguousarray(img)
-
-    d = dcrf.DenseCRF2D(w, h, c)
-    d.setUnaryEnergy(U)
-    d.addPairwiseGaussian(sxy=POS_XY_STD, compat=POS_W)
-    d.addPairwiseBilateral(sxy=Bi_XY_STD, srgb=Bi_RGB_STD, rgbim=img, compat=Bi_W)
-
-    Q = d.inference(MAX_ITER)
-    Q = np.array(Q).reshape((c, h, w))
-    return Q
 
 
 def test(cfg):    
     SEED = cfg.values.seed    
     BACKBONE = cfg.values.backbone
+    BACKBONE_WEIGHT = cfg.values.backbone_weight
     MODEL_ARC = cfg.values.model_arc
     NUM_CLASSES = cfg.values.num_classes
 
@@ -72,7 +42,7 @@ def test(cfg):
         albumentations.Resize(512, 512),
         albumentations.Normalize(mean=(0.461, 0.440, 0.419), std=(0.211, 0.208, 0.216)),
         albumentations.pytorch.transforms.ToTensorV2()])
-
+    
     size = 256
     resize = albumentations.Resize(size, size)
     
@@ -84,6 +54,7 @@ def test(cfg):
 
     model = model_module(
         encoder_name=BACKBONE,
+        encoder_weights=BACKBONE_WEIGHT,
         in_channels=3,
         classes=NUM_CLASSES
     )

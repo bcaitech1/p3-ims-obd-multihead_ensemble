@@ -1,6 +1,7 @@
 base:
   seed: 42
   backbone: 'timm-efficientnet-b2'
+  backbone_weight: 'noisy-student'
   model_arc: 'PAN'
   num_classes: 12
   output_dir: './results/'
@@ -14,8 +15,25 @@ base:
     val_batch_size: 16
 
 DeepLabV3Plus:
+  seed: 77
+  backbone: 'timm-efficientnet-b2'
+  backbone_weight: 'imagenet'
+  model_arc: 'DeepLabV3Plus'
+  num_classes: 12
+  output_dir: './results/'
+  train_args:
+    num_epochs: 30
+    train_batch_size: 16
+    lr: 0.0001
+    weight_decay: 0.0
+    log_intervals: 10         
+  val_args:    
+    val_batch_size: 16
+
+DeepLabV3Plus-1:
   seed: 42
   backbone: 'timm-efficientnet-b2'
+  backbone_weight: 'noisy-student'
   model_arc: 'DeepLabV3Plus'
   num_classes: 12
   output_dir: './results/'
@@ -23,15 +41,17 @@ DeepLabV3Plus:
     num_epochs: 20
     train_batch_size: 16
     lr: 0.001
-    weight_decay: 0.000006
+    weight_decay: 0.0
     log_intervals: 10         
   val_args:    
     val_batch_size: 16
 
-DeepLabV3:
+
+UNetPlusPlus:
   seed: 42
   backbone: 'timm-efficientnet-b2'
-  model_arc: 'DeepLabV3'
+  backbone_weight: 'noisy-student'
+  model_arc: 'UNetPlusPlus'
   num_classes: 12
   output_dir: './results/'
   train_args:

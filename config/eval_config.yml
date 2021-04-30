@@ -1,6 +1,7 @@
 base:
   seed: 42
   backbone: 'timm-efficientnet-b2'
+  backbone_weight: 'imagenet'
   model_arc: 'PAN'
   num_classes: 12
   checkpoint: '20_epoch_47.08%_with_val.pth'
@@ -8,16 +9,18 @@ base:
 
 DeepLabV3Plus:
   seed: 42
-  backbone: 'timm-efficientnet-b2'
+  backbone: 'resnext101_32x8d'
+  backbone_weight: 'swsl'
   model_arc: 'DeepLabV3Plus'
   num_classes: 12
-  checkpoint: '17_epoch_46.84%_with_val.pth'
-  test_batch_size: 16  
+  checkpoint: '18_epoch_33.91%.pth'
+  test_batch_size: 10
 
-DeepLabV3:
+DeepLabV3Plus-1:
   seed: 42
   backbone: 'timm-efficientnet-b2'
-  model_arc: 'DeepLabV3'
+  backbone_weight: 'imagenet'
+  model_arc: 'DeepLabV3Plus'
   num_classes: 12
-  checkpoint: ''
+  checkpoint: '30_epoch_48.76%.pth'
   test_batch_size: 16

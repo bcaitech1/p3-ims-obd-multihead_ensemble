@@ -1,6 +1,8 @@
 # p3-ims-obd-multihead_ensemble
 p3-ims-obd-multihead_ensemble created by GitHub Classroom
 
+(augmix.npy 파일)[https://drive.google.com/file/d/1ecWQ43HK5d5-ZI8HwLVEFsbVreycaYOw/view?usp=sharing]
+
 ```
 
 

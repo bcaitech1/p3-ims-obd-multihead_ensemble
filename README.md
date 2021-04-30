@@ -3,11 +3,18 @@ p3-ims-obd-multihead_ensemble created by GitHub Classroom
 
 ```
 
-# -> train.py 
+
 np_load_old=np.load
     np.load = lambda *a, **k: np_load_old(*a, allow_pickle=True, **k)
     augmix_data=np.load('aug.npy')
     
+```
+- train.py 에서 위에 코드 실행 
+
+
+
+```
+
  ##-> train.py 에서 augmix_data를 생성 -> 인자로 전달 
 def train_valid(epoch, model, train_dl, valid_dl, criterion, optimizer, logger, device, scheduler, args, augmix_data, use_augmix): ## -> augmix_data 를 인자로 받고
     best_score = 0
@@ -57,3 +64,12 @@ def train_valid(epoch, model, train_dl, valid_dl, criterion, optimizer, logger, 
                     save_model(model, args.version)
                     print('best_model_saved')
 ```
+- utils.py 에서 train 함수에서 augmix_data를 인자도 새로 추가해서 
+```
+ #################################################### -> 이부분에 추가 
+                    if phase == 'train' and use_augmix:
+                        images, masks = augmix_search(augmix_data.item(), images, masks)
+                    images, masks = images.to(device), masks.to(device).long()
+                    ####################################################
+```
+-  추가 

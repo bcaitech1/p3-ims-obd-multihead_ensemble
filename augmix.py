@@ -28,7 +28,7 @@ def imbalence_aug(tr_img, tr_mask, classdict):
         mask[mask == 9] = 0
         class_type = np.unique(mask)
         if len(class_type) == 1:
-            break
+            continue
         mask3d = np.dstack([mask]*3)
         res = np.where(mask3d, 0, img)
         res1 = cv2.bitwise_and(img, img, mask=mask)

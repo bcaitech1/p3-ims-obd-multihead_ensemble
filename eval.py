@@ -24,8 +24,8 @@ from src.model import *
 def test(cfg):    
     SEED = cfg.values.seed    
     BACKBONE = cfg.values.backbone
-    BACKBONE_WEIGHT = cfg.values.backbone_weight
     MODEL_ARC = cfg.values.model_arc
+    IMAGE_SIZE = cfg.values.image_size
     NUM_CLASSES = cfg.values.num_classes
 
     checkpoint = cfg.values.checkpoint
@@ -39,7 +39,7 @@ def test(cfg):
     checkpoint_path = f'/opt/ml/vim-hjk/results/{MODEL_ARC}'
 
     test_transform = albumentations.Compose([
-        albumentations.Resize(512, 512),
+        albumentations.Resize(IMAGE_SIZE, IMAGE_SIZE),
         albumentations.Normalize(mean=(0.461, 0.440, 0.419), std=(0.211, 0.208, 0.216)),
         albumentations.pytorch.transforms.ToTensorV2()])
     
@@ -54,7 +54,6 @@ def test(cfg):
 
     model = model_module(
         encoder_name=BACKBONE,
-        encoder_weights=BACKBONE_WEIGHT,
         in_channels=3,
         classes=NUM_CLASSES
     )

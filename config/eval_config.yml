@@ -1,26 +1,35 @@
 base:
-  seed: 42
+  seed: 77
   backbone: 'timm-efficientnet-b2'
-  backbone_weight: 'imagenet'
   model_arc: 'PAN'
+  image_size: 512
   num_classes: 12
   checkpoint: '20_epoch_47.08%_with_val.pth'
   test_batch_size: 16  
 
 DeepLabV3Plus:
-  seed: 42
+  seed: 77
   backbone: 'resnext101_32x8d'
-  backbone_weight: 'swsl'
   model_arc: 'DeepLabV3Plus'
+  image_size: 512
   num_classes: 12
   checkpoint: '18_epoch_33.91%.pth'
   test_batch_size: 10
 
 DeepLabV3Plus-1:
-  seed: 42
+  seed: 77
   backbone: 'timm-efficientnet-b2'
-  backbone_weight: 'imagenet'
   model_arc: 'DeepLabV3Plus'
+  image_size: 512
   num_classes: 12
   checkpoint: '30_epoch_48.76%.pth'
   test_batch_size: 16
+
+Light:
+  seed: 77
+  backbone: 'timm-efficientnet-b0'
+  model_arc: 'UnetPlusPlus'
+  image_size: 256
+  num_classes: 12
+  checkpoint: '19_epoch_37.51%.pth'
+  test_batch_size: 64

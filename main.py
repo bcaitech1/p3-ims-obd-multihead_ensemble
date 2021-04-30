@@ -1,5 +1,5 @@
 import os
-from albumentations.augmentations.transforms import ElasticTransform, Normalize
+import wandb
 import torch
 import argparse
 import pandas as pd
@@ -15,6 +15,7 @@ def main(cfg):
     SEED = cfg.values.seed
     TRAIN_BATCH_SIZE = cfg.values.train_args.train_batch_size
     VAL_BATCH_SIZE = cfg.values.val_args.val_batch_size
+    IMAGE_SIZE = cfg.values.image_size
 
     seed_everything(SEED)
 
@@ -24,14 +25,13 @@ def main(cfg):
     val_path = 'val.json'
 
     train_transform = albumentations.Compose([
-        albumentations.Resize(512, 512),
+        albumentations.Resize(IMAGE_SIZE, IMAGE_SIZE),
         albumentations.ElasticTransform(),
         albumentations.Normalize(mean=(0.461, 0.440, 0.419), std=(0.211, 0.208, 0.216)),
         albumentations.pytorch.transforms.ToTensorV2()])
 
     val_transform = albumentations.Compose([
-        albumentations.Resize(512, 512),
-        albumentations.ElasticTransform(),
+        albumentations.Resize(IMAGE_SIZE, IMAGE_SIZE),
         albumentations.Normalize(mean=(0.461, 0.440, 0.419), std=(0.211, 0.208, 0.216)),
         albumentations.pytorch.transforms.ToTensorV2()])
 
@@ -42,12 +42,16 @@ def main(cfg):
 
 
 if __name__ == '__main__':
+    wandb.init(project="P-stage3-semantic", reinit=True)    
     parser = argparse.ArgumentParser()
     parser.add_argument('--config_file_path', type=str, default='./config/config.yml')
     parser.add_argument('--config', type=str, default='base')
-    
-    args = parser.parse_args()
+    args = parser.parse_args()    
+    wandb.run.name = args.config
+    wandb.run.save()
+
     cfg = YamlConfigManager(args.config_file_path, args.config)
+    wandb.config.update(cfg)
     cpprint(cfg.values, sort_dict_keys=False)
     print('\n')
     main(cfg)

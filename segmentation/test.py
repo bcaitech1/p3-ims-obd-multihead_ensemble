@@ -3,9 +3,14 @@ import cv2
 import argparse
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 import albumentations as A
+import multiprocessing as mp
 import segmentation_models_pytorch as smp
 from albumentations.pytorch import ToTensorV2
+
+import pydensecrf.densecrf as dcrf
+import pydensecrf.utils as utils
 
 import torch
 from torch.utils.data import DataLoader
@@ -15,8 +20,40 @@ from src.utils import seed_everything
 from src.utils import make_cat_df
 from src.utils import cls_colors
 from src.dataset import SegmentationDataset
+from src.models.fcn8s import FCN8s
 
 import torch.nn.functional as F
+
+
+def dense_crf_wrapper(args):
+    return dense_crf(args[0], args[1])
+
+def dense_crf(img, output_probs):
+    MAX_ITER = 10
+    POS_W = 3
+    POS_XY_STD = 1
+    Bi_W = 4
+    Bi_XY_STD = 67
+    Bi_RGB_STD = 3
+
+    c = output_probs.shape[0]
+    h = output_probs.shape[1]
+    w = output_probs.shape[2]
+
+    U = utils.unary_from_softmax(output_probs)
+    U = np.ascontiguousarray(U)
+
+    img = np.ascontiguousarray(img)
+
+    d = dcrf.DenseCRF2D(w, h, c)
+    d.setUnaryEnergy(U)
+    d.addPairwiseGaussian(sxy=POS_XY_STD, compat=POS_W)
+    d.addPairwiseBilateral(sxy=Bi_XY_STD, srgb=Bi_RGB_STD, rgbim=img, compat=Bi_W)
+
+    Q = d.inference(MAX_ITER)
+    Q = np.array(Q).reshape((c, h, w))
+    return Q
+
 
 def main():
     parser = argparse.ArgumentParser(description="MultiHead Ensemble Team")
@@ -87,9 +124,14 @@ def main():
     file_name_list = []
     preds_array = np.empty((0, size * size), dtype=np.long)
 
+
+
     cnt = 1
+    tar_size = 512
+    print("Start Inference.")
+    torch.multiprocessing.set_start_method('spawn')
     with torch.no_grad():
-        for step, sample in enumerate(test_dl):
+        for step, sample in tqdm(enumerate(test_dl), total=len(test_dl)):
             imgs = sample['image']
             file_names = sample['info']
 
@@ -98,23 +140,32 @@ def main():
             if isinstance(preds, list):
                 aux_preds, preds = preds
                 ph, pw = preds.size(2), preds.size(3)
-                if ph != 256 or pw != 256:
+                if ph != tar_size or pw != tar_size:
                     preds = F.interpolate(input=preds, size=(
-                        256, 256), mode='bilinear', align_corners=True)
-            oms = torch.argmax(preds.squeeze(), dim=1).detach().cpu().numpy()
+                        tar_size, tar_size), mode='bilinear', align_corners=True)
+            probs = F.softmax(preds, dim=1).detach().cpu().numpy()
+
+            pool = mp.Pool(mp.cpu_count())
+            images = imgs.detach().cpu().numpy().astype(np.uint8).transpose(0, 2, 3, 1)
+            if images.shape[1] != tar_size or images.shape[2] != tar_size:
+                images = np.stack([resize(image=im)['image'] for im in images], axis=0)
+
+            probs = np.array(pool.map(dense_crf_wrapper, zip(images, probs)))
+            pool.close()
+
+            oms = np.argmax(probs.squeeze(), axis=1)
 
             if args.debug:
                 debug_path = os.path.join('.', 'debug', 'test', args.postfix)
                 if not os.path.exists(debug_path):
                     os.makedirs(debug_path)
 
-                ph, pw = preds.size(2), preds.size(3)
-                if ph != 512 or pw != 512:
-                    preds = F.interpolate(input=preds, size=(512, 512), mode='bilinear', align_corners=True)
-                pred_masks = torch.argmax(preds.squeeze(), dim=1).detach().cpu().numpy()
                 for idx, file_name in enumerate(file_names):
-                    pred_mask = pred_masks[idx]
+                    pred_mask = oms[idx]
+                    ph, pw = pred_mask.shape
                     ori_image = cv2.imread(os.path.join('.', 'input', 'data', file_name))
+                    if ori_image.shape[0] != ph or ori_image.shape[1] != pw:
+                        ori_image = cv2.resize(ori_image, (ph, pw))
                     ori_image = ori_image.astype(np.float32)
 
                     for i in range(1, 12):

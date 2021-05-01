@@ -1,4 +1,5 @@
 import os
+import wandb
 import logging
 import argparse
 import numpy as np
@@ -16,6 +17,7 @@ from src.utils import save_model
 from src.dataset import SegmentationDataset
 from src.models.fcn8s import FCN8s
 from src.losses import *
+from src.schedulers import CosineAnnealingWarmupRestarts
 
 from torch.utils.data import DataLoader
 from torchvision.models import vgg16
@@ -39,6 +41,8 @@ def main():
     args = parser.parse_args()
     print(args)
 
+    wandb.init(config=args, project="[Pstage-Seg]", name=args.version, save_code=True)
+
     # for reproducibility
     seed_everything(args.seed)
 
@@ -58,18 +62,18 @@ def main():
 
     # define transform
     trn_tfms = A.Compose([
-        # A.HorizontalFlip(p=0.5),
-        # A.VerticalFlip(p=0.5),
-        # A.RandomRotate90(p=0.5),
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.5),
+        A.RandomRotate90(p=0.5),
 
         # A.RandomBrightnessContrast(p=0.5),
         # A.RandomGamma(p=0.5),
         #
-        # A.OneOf([
-        #     A.ElasticTransform(p=1, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03),
-        #     A.GridDistortion(p=1),
-        #     A.OpticalDistortion(distort_limit=1, shift_limit=0.5, p=1),
-        # ], p=0.6),
+        A.OneOf([
+            A.ElasticTransform(p=1, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03),
+            A.GridDistortion(p=1),
+            A.OpticalDistortion(distort_limit=1, shift_limit=0.5, p=1),
+        ], p=0.6),
 
         # A.OneOf([
         #     A.RGBShift(p=1.0),
@@ -77,8 +81,8 @@ def main():
         #     A.ChannelShuffle(p=1.0),
         # ], p=.5),
 
-        A.Normalize(),
-        ToTensorV2()
+        # A.Normalize(),
+        # ToTensorV2()
     ])
 
     val_tfms = A.Compose([
@@ -136,6 +140,13 @@ def main():
             in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
             classes=12,  # model output channels (number of classes in your dataset)
         )
+    elif args.model_type == "unet_pp":
+        model = smp.UnetPlusPlus(
+            encoder_name="efficientnet-b3",  # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+            encoder_weights="imagenet",
+            in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+            classes=12,  # model output channels (number of classes in your dataset)
+        )
     elif args.model_type == 'deeplabv3':
         model = smp.DeepLabV3(
             encoder_name='efficientnet-b0',
@@ -159,15 +170,21 @@ def main():
         model = get_seg_model(cfg)
 
     model = model.to(device)
+    wandb.watch(model)
+
     optimizer = optim.AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.decay)
-    # total_steps = int(len(trn_dl)*args.epochs)
-    # warup_steps = int(total_steps*0.15)
-    # scheduler = CosineAnnealingWarmupRestarts(optimizer,
-    #                                           first_cycle_steps=int(len(trn_dl)*args.epochs), cycle_mult=1.0,
-    #                                           max_lr=0.1, min_lr=0.0001,
-    #                                           warmup_steps=warup_steps, gamma=1.0)
+    first_cycle_steps = len(trn_dl) * args.epochs // 3
+    scheduler = CosineAnnealingWarmupRestarts(
+        optimizer,
+        first_cycle_steps=first_cycle_steps,
+        cycle_mult=1.0,
+        max_lr=0.001,
+        min_lr=0.0001,
+        warmup_steps=int(first_cycle_steps * 0.25),
+        gamma=0.5
+    )
     # scheduler = optim.lr_scheduler.OneCycleLR(optimizer, max_lr=1e-3, steps_per_epoch=len(trn_dl), epochs=args.epochs, anneal_strategy='cos')
-    scheduler = None
+    # scheduler = None
 
     normedWeights = None
     if args.use_weight:

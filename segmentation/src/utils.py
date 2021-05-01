@@ -1,15 +1,20 @@
 import os
 import cv2
 import json
+import wandb
 import random
 import collections
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
 import torch
 import torch.nn.functional as F
+
+from src.augmix import augmix_search
 
 
 num_cls = 12
@@ -22,6 +27,7 @@ cls_colors = {k: colors[k] for k in range(num_cls+1)}
 def seed_everything(seed=42):
     random.seed(seed)
     np.random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
 
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -29,6 +35,8 @@ def seed_everything(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+    import imgaug
+    imgaug.random.seed(seed)
 
 
 def make_cat_df(train_annot_path, debug=False):
@@ -131,38 +139,61 @@ def save_model(model, version, save_type='loss'):
     torch.save(model.state_dict(), save_dir)
 
 
-def rand_bbox(size, lam, mask):
+def rand_bbox(size, mask):
     W = size[2]
     H = size[3]
-    cut_rat = np.sqrt(1. - lam)
+    cut_rat = 0.9
 
     # uniform
     hs, ws = (mask > 0).nonzero(as_tuple=True)
-    try:
-        hmin, hmax = hs.min().item(), hs.max().item()
-        wmin, wmax = ws.min().item(), ws.max().item()
+    hmin, hmax = hs.min().item(), hs.max().item()
+    wmin, wmax = ws.min().item(), ws.max().item()
 
-        cut_w = np.int((wmax - wmin) * cut_rat)
-        cut_h = np.int((hmax - hmin) * cut_rat)
+    cut_w = np.int((wmax - wmin) * cut_rat)
+    cut_h = np.int((hmax - hmin) * cut_rat)
 
-        cx = np.random.randint(wmin, wmax)
-        cy = np.random.randint(hmin, hmax)
-    except Exception as e:
-        cut_w = np.int(W * cut_rat)
-        cut_h = np.int(H * cut_rat)
-
-        cx = np.random.randint(W)
-        cy = np.random.randint(H)
+    w, h = (wmin - wmax) // 2, (hmin - hmax) // 2
+    cx = np.random.randint(wmin + w // 4, wmax - w // 4)
+    cy = np.random.randint(hmin + h // 4, hmax - h // 4)
 
     bbx1 = np.clip(cx - cut_w // 2, 0, W)
     bby1 = np.clip(cy - cut_h // 2, 0, H)
     bbx2 = np.clip(cx + cut_w // 2, 0, W)
     bby2 = np.clip(cy + cut_h // 2, 0, H)
+
     return bbx1, bby1, bbx2, bby2
 
 
-def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, logger, device, beta=0.0, debug=True):
+def get_learning_rate(optimizer):
+    lr = []
+    for param_group in optimizer.param_groups:
+        lr += [param_group['lr']]
+    return lr
+
+
+class_labels ={
+        0: 'Background',
+        1: 'UNKNOWN',
+        2: 'General trash',
+        3: 'Paper',
+        4: 'Paper pack',
+        5: 'Metal',
+        6: 'Glass',
+        7: 'Plastic',
+        8: 'Styrofoam',
+        9: 'Plastic bag',
+        10: 'Battery',
+        11: 'Clothing'
+    }
+
+
+def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, logger, device, beta=0.0, augmix_data=None, debug=True):
     cnt = 1
+    if augmix_data is not None:
+        post_tfms = A.Compose([
+            A.Normalize(),
+            ToTensorV2()
+        ])
 
     model.train()
     trn_losses = []
@@ -174,13 +205,25 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
 
             optimizer.zero_grad()
             images, masks = sample['image'], sample['mask']
+            if augmix_data is not None:
+                images, masks = augmix_search(augmix_data.item(), images.numpy().astype(np.float32), masks.numpy())
+
+                i, m = [], []
+                for img, mask in zip(images, masks):
+                    post_tfmsed = post_tfms(image=img, mask=mask)
+                    img, mask = post_tfmsed['image'], post_tfmsed['mask']
+                    i.append(img)
+                    m.append(mask)
+
+                images = torch.stack(i)
+                masks = torch.stack(m)
             images, masks = images.to(device), masks.to(device).long()
 
             if beta > 0:
                 lam = np.random.beta(beta, beta)
                 rand_index = torch.randperm(images.size()[0]).cuda()
                 for image_idx, rand_idx in enumerate(rand_index):
-                    bbx1, bby1, bbx2, bby2 = rand_bbox(images.size(), lam, masks[rand_idx])
+                    bbx1, bby1, bbx2, bby2 = rand_bbox(images.size(), masks[rand_idx])
                     images[image_idx, :, bbx1:bbx2, bby1:bby2] = images[rand_idx, :, bbx1:bbx2, bby1:bby2]
                     masks[image_idx, bbx1:bbx2, bby1:bby2] = masks[rand_idx, bbx1:bbx2, bby1:bby2]
 
@@ -213,8 +256,14 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
             hist = add_hist(hist, masks.detach().cpu().numpy(), preds, n_class=12)
             trn_mIoU = label_accuracy_score(hist)[2]
 
+            wandb.log({
+                'Learning rate': get_learning_rate(optimizer)[0],
+                'Train Loss value': np.mean(trn_losses),
+                'Train mean IoU value': trn_mIoU * 100.0,
+            })
+
             trn_losses.append(loss.item())
-            if (batch+1) % (int(len(trn_dl)//10)) == 0:
+            if (batch+1) % (int(len(trn_dl)//10)) == 0 or (batch+1) == len(trn_dl):
                 logger.info(f'Train Epoch {epoch+1} ==>  Batch [{str(batch+1).zfill(len(str(len(trn_dl))))}/{len(trn_dl)}]  |  Loss: {np.mean(trn_losses):.5f}  |  mIoU: {trn_mIoU:.5f}')
 
             trn_bar.set_postfix(trn_loss=np.mean(trn_losses),
@@ -224,6 +273,8 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
     model.eval()
     val_losses = []
     hist = np.zeros((12, 12))
+    example_images = []
+
     logger.info(f"\nValid on Epoch {epoch+1}")
     with torch.no_grad():
         with tqdm(val_dl, total=len(val_dl), unit='batch') as val_bar:
@@ -268,15 +319,35 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
                         cv2.imwrite(os.path.join(debug_path, f"{cnt}.jpg"), ori_image)
                         cnt += 1
 
+                input_np = cv2.imread(os.path.join('.', 'input', 'data', file_names[0]))
+                example_images.append(wandb.Image(input_np, masks={
+                    "predictions": {
+                        "mask_data": preds.argmax(1)[0].detach().cpu().numpy(),
+                        "class_labels": class_labels
+                    },
+                    "ground-truth": {
+                        "mask_data": masks[0].detach().cpu().numpy(),
+                        "class_labels": class_labels
+                    }
+                }))
+
                 preds = torch.argmax(preds, dim=1).detach().cpu().numpy()
                 hist = add_hist(hist, masks.detach().cpu().numpy(), preds, n_class=12)
                 val_mIoU = label_accuracy_score(hist)[2]
 
-                if (batch + 1) % (int(len(trn_dl) // 10)) == 0:
+
+
+                if (batch + 1) % (int(len(trn_dl) // 10)) == 0 or (batch+1) == len(val_dl):
                     logger.info(
                         f'Valid Epoch {epoch+1} ==>  Batch [{str(batch+1).zfill(len(str(len(val_dl))))}/{len(val_dl)}]  |  Loss: {np.mean(val_losses):.5f}  |  mIoU: {val_mIoU:.5f}')
 
                 val_bar.set_postfix(val_loss=np.mean(val_losses),
                                     val_mIoU=val_mIoU)
+
+            wandb.log({
+                'Example Image': example_images,
+                'Valid Loss value': np.mean(val_losses),
+                'Valid mean IoU value': val_mIoU * 100.0,
+            })
 
     return np.mean(trn_losses), trn_mIoU, np.mean(val_losses), val_mIoU

@@ -660,6 +660,7 @@ class HighResolutionNet(nn.Module):
                 continue
             if isinstance(m, nn.Conv2d):
                 nn.init.normal_(m.weight, std=0.001)
+                # print(m.weight, "\n")
             elif isinstance(m, BatchNorm2d_class):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)

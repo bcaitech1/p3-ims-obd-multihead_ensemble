@@ -37,6 +37,7 @@ class DiceLoss(nn.Module):
 class DiceCELoss(nn.Module):
     def __init__(self, weight=None, size_average=True):
         super(DiceCELoss, self).__init__()
+        self.weight = weight
 
     def forward(self, inputs, targets, smooth=1):
         num_classes = inputs.size(1)
@@ -52,7 +53,7 @@ class DiceCELoss(nn.Module):
         dice_loss = ((2. * intersection + smooth) / (cardinality + smooth)).mean()
         dice_loss = (1 - dice_loss)
 
-        ce = F.cross_entropy(inputs, targets, reduction='mean')
+        ce = F.cross_entropy(inputs, targets, reduction='mean', weight=self.weight)
         dice_bce = ce * 0.25 + dice_loss * 0.75
         return dice_bce
 

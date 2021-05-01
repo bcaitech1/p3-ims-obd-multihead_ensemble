@@ -128,3 +128,5 @@ logs
 __pycache__/
 debug
 *.csv
+pretrained
+kfold_json

@@ -21,7 +21,7 @@ from src.utils import seed_everything, YamlConfigManager, get_dataloader, dense_
 from src.model import *
 
 
-def test(cfg):    
+def test(cfg, crf):    
     SEED = cfg.values.seed    
     BACKBONE = cfg.values.backbone
     MODEL_ARC = cfg.values.model_arc
@@ -73,11 +73,12 @@ def test(cfg):
             outs = model(torch.stack(imgs).to(device))
             probs = F.softmax(outs, dim=1).data.cpu().numpy()
             
-            pool = mp.Pool(mp.cpu_count())
-            images = torch.stack(imgs).data.cpu().numpy().astype(np.uint8).transpose(0, 2, 3, 1)
-            probs = np.array(pool.map(dense_crf_wrapper, zip(images, probs)))
-            pool.close()
-            
+            if crf:                
+                pool = mp.Pool(mp.cpu_count())
+                images = torch.stack(imgs).data.cpu().numpy().astype(np.uint8).transpose(0, 2, 3, 1)
+                probs = np.array(pool.map(dense_crf_wrapper, zip(images, probs)))
+                pool.close()
+
             oms = np.argmax(probs, axis=1)
             
             # resize (256 x 256)
@@ -99,12 +100,12 @@ def test(cfg):
     return file_names, preds_array
 
 
-def make_submission(cfg):
+def make_submission(cfg, crf):
     # sample_submisson.csv 열기
     submission = pd.read_csv('../code/submission/sample_submission.csv', index_col=None)
 
     # test set에 대한 prediction
-    file_names, preds = test(cfg)
+    file_names, preds = test(cfg, crf)
 
     # PredictionString 대입
     for file_name, string in zip(file_names, preds):
@@ -119,9 +120,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--eval_config_file_path', type=str, default='./config/eval_config.yml')
     parser.add_argument('--eval_config', type=str, default='base')
+    parser.add_argument('--crf', type=bool, default=False)
     
     args = parser.parse_args()
     cfg = YamlConfigManager(args.eval_config_file_path, args.eval_config)
     cpprint(cfg.values, sort_dict_keys=False)
     print('\n')
-    make_submission(cfg)
+    print(f'CRF : {args.crf}')
+    make_submission(cfg, args.crf)

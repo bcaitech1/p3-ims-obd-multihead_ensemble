@@ -16,14 +16,14 @@ DeepLabV3Plus:
   checkpoint: '18_epoch_33.91%.pth'
   test_batch_size: 10
 
-DeepLabV3Plus-1:
+DeepLabV3Plus-b3:
   seed: 77
-  backbone: 'timm-efficientnet-b2'
+  backbone: 'timm-efficientnet-b3'
   model_arc: 'DeepLabV3Plus'
   image_size: 512
   num_classes: 12
-  checkpoint: '30_epoch_48.76%.pth'
-  test_batch_size: 16
+  checkpoint: '49_epoch_52.56%.pth'
+  test_batch_size: 8
 
 Light:
   seed: 77
@@ -33,3 +33,13 @@ Light:
   num_classes: 12
   checkpoint: '19_epoch_37.51%.pth'
   test_batch_size: 64
+
+
+QuadraUNetPlusPlus:
+  seed: 77
+  backbone: 'timm-efficientnet-b3'
+  model_arc: 'Unet3PlusPlus'
+  image_size: 512
+  num_classes: 12
+  checkpoint: '30_epoch_48.76%.pth'
+  test_batch_size: 16

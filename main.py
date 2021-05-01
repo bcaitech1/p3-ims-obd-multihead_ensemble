@@ -27,6 +27,7 @@ def main(cfg):
     train_transform = albumentations.Compose([
         albumentations.Resize(IMAGE_SIZE, IMAGE_SIZE),
         albumentations.ElasticTransform(),
+        albumentations.CLAHE(),
         albumentations.Normalize(mean=(0.461, 0.440, 0.419), std=(0.211, 0.208, 0.216)),
         albumentations.pytorch.transforms.ToTensorV2()])
 

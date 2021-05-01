@@ -3,7 +3,8 @@ import wandb
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import segmentation_models_pytorch
+import segmentation_models_pytorch as smp
+import cv2
 
 from tqdm import tqdm
 from glob import glob
@@ -14,7 +15,7 @@ from torchsummary import summary as summary_
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from importlib import import_module
 
-from .losses import OnlineHardExampleMiningLoss, DiceLoss
+from .losses import FocalLoss, OnlineHardExampleMiningLoss, DiceLoss
 from .utils import AverageMeter, pixel_accuracy, mIoU, get_learning_rate, CosineAnnealingWarmupRestarts, denormalize_image
 from . import lovasz_losses as L
 from .model import CustomFCN8s, CustomFCN16s, CustomFCN32s
@@ -29,6 +30,7 @@ def train(cfg, train_loader, val_loader):
     NUM_CLASSES = cfg.values.num_classes
 
     LAMBDA = 0.75
+    AUX_WEIGHT = 0.4
 
     SAVE_PATH = os.path.join(OUTPUT_DIR, MODEL_ARC)
 
@@ -47,25 +49,49 @@ def train(cfg, train_loader, val_loader):
         11: 'Clothing'
     }
 
+    pos_weight = [
+        0.3040,
+        0.9994,
+        0.9778,
+        0.9097,
+        0.9930,
+        0.9911,
+        0.9924,
+        0.9713,
+        0.9851,
+        0.8821,
+        0.9995,
+        0.9947
+    ]
+
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+    pos_weight = torch.tensor(pos_weight).float().to(device)
+
     os.makedirs(SAVE_PATH, exist_ok=True)
 
     # Set train arguments
     num_epochs = cfg.values.train_args.num_epochs
-    train_batch_size = cfg.values.train_args.train_batch_size
     log_intervals = cfg.values.train_args.log_intervals
     max_lr = cfg.values.train_args.max_lr
     min_lr = cfg.values.train_args.min_lr
-    weight_decay = cfg.values.train_args.weight_decay
-
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    weight_decay = cfg.values.train_args.weight_decay    
 
     model_module = getattr(import_module('segmentation_models_pytorch'), MODEL_ARC)    
+
+    aux_params=dict(
+        pooling='avg',
+        dropout=0.5,
+        activation=None,
+        classes=12
+    )
     
     model = model_module(
         encoder_name=BACKBONE,
         encoder_weights=BACKBONE_WEIGHT,
         in_channels=3,
-        classes=NUM_CLASSES
+        classes=NUM_CLASSES,
+        aux_params=aux_params
     )
     
     model.to(device)
@@ -73,7 +99,7 @@ def train(cfg, train_loader, val_loader):
     # summary_(model, (3, 512, 512), train_batch_size)
 
     optimizer = MADGRAD(model.parameters(), lr=max_lr, weight_decay=weight_decay)
-    first_cycle_steps = len(train_loader) * num_epochs // (num_epochs // 10)
+    first_cycle_steps = len(train_loader) * num_epochs // 3
     scheduler = CosineAnnealingWarmupRestarts(
         optimizer, 
         first_cycle_steps=first_cycle_steps, 
@@ -83,7 +109,10 @@ def train(cfg, train_loader, val_loader):
         warmup_steps=int(first_cycle_steps * 0.25), 
         gamma=0.5
     )
-    criterion = nn.CrossEntropyLoss()
+    
+    auxilary_criterion = nn.BCEWithLogitsLoss()
+
+    criterion = nn.CrossEntropyLoss(weight=pos_weight)
     criterion_2 = DiceLoss()
 
     wandb.watch(model)
@@ -97,18 +126,22 @@ def train(cfg, train_loader, val_loader):
         mIoU_values = AverageMeter()
         accuracy = AverageMeter()
 
-        for i, (images, masks, _) in enumerate(tqdm(train_loader, desc=f'Training')):
+        for i, (images, masks, one_hot_label, _) in enumerate(tqdm(train_loader, desc=f'Training')):
             images = torch.stack(images)       
-            masks = torch.stack(masks).long()  
+            masks = torch.stack(masks).long()
+            one_hot_label = torch.stack(one_hot_label).float()
 
             images, masks = images.to(device), masks.to(device)
+            one_hot_label = one_hot_label.to(device)
 
-            logits = model(images)
+            logits, aux_logits = model(images)
+
+            aux_loss = auxilary_criterion(aux_logits, one_hot_label)
 
             loss_1 = criterion(logits, masks)
-            loss_2 = criterion_2(logits, masks)       
+            loss_2 = criterion_2(logits, masks)      
 
-            loss = loss_1 * (1 - LAMBDA) + loss_2 * LAMBDA
+            loss = loss_1 * LAMBDA + loss_2 * (1 - LAMBDA) + aux_loss * AUX_WEIGHT
             
             acc = pixel_accuracy(logits, masks)
             m_iou = mIoU(logits, masks)       
@@ -147,19 +180,23 @@ def train(cfg, train_loader, val_loader):
             
             example_images = []
 
-            for i, (images, masks, _) in enumerate(tqdm(val_loader, desc=f'Validation')):
+            for i, (images, masks, one_hot_label, _) in enumerate(tqdm(val_loader, desc=f'Validation')):
                 
                 images = torch.stack(images)
                 masks = torch.stack(masks).long()  
+                one_hot_label = torch.stack(one_hot_label).float()
 
                 images, masks = images.to(device), masks.to(device)
+                one_hot_label = one_hot_label.to(device)
 
-                logits = model(images)
+                logits, aux_logits = model(images)
+
+                aux_loss = auxilary_criterion(aux_logits, one_hot_label)
 
                 loss_1 = criterion(logits, masks)
-                loss_2 = criterion_2(logits, masks)  
+                loss_2 = criterion_2(logits, masks)
 
-                loss = loss_1 * (1 - LAMBDA) + loss_2 * LAMBDA
+                loss = loss_1 * LAMBDA + loss_2 * (1 - LAMBDA) + aux_loss * AUX_WEIGHT
 
                 acc = pixel_accuracy(logits, masks)
                 m_iou = mIoU(logits, masks)                 
@@ -199,7 +236,7 @@ def train(cfg, train_loader, val_loader):
 
         if is_best:
             if len(glob(SAVE_PATH + '/*.pth')) > 2:
-                os.remove(glob(SAVE_PATH + '/*.pth')[0])
+                os.remove(glob(SAVE_PATH + '/*.pth')[-1])
             torch.save(model.state_dict(), os.path.join(SAVE_PATH, f'{epoch + 1}_epoch_{best_score * 100.0:.2f}%.pth'))
         
 

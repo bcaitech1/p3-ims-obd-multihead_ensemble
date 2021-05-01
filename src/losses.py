@@ -8,7 +8,6 @@ class DiceLoss(nn.Module):
         super(DiceLoss, self).__init__()
 
     def forward(self, inputs, targets, smooth=1):
-        # flatten label and prediction tensors
         num_classes = inputs.size(1)
         true_1_hot = torch.eye(num_classes)[targets]
 
@@ -51,9 +50,8 @@ class IoULoss(nn.Module):
 class FocalLoss(nn.Module):
     def __init__(self, gamma=2, alpha=.25, eps=1e-7, weights=None):
         super(FocalLoss, self).__init__()
-
-        self.alpha = alpha
         self.gamma = gamma
+        self.alpha = alpha
         self.eps = eps
         self.weight = weights
 

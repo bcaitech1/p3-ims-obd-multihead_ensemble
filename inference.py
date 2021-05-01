@@ -17,7 +17,7 @@ from src.utils import seed_everything, YamlConfigManager, get_dataloader, dense_
 from src.model import *
 
 
-def inference(cfg, limit):    
+def inference(cfg, limit, crf):    
     SEED = cfg.values.seed    
     BACKBONE = cfg.values.backbone
     MODEL_ARC = cfg.values.model_arc
@@ -85,10 +85,11 @@ def inference(cfg, limit):
             outs = model(image.to(device))
             probs = F.softmax(outs, dim=1).data.cpu().numpy()
             
-            pool = mp.Pool(mp.cpu_count())
-            images = image.data.cpu().numpy().astype(np.uint8).transpose(0, 2, 3, 1)
-            probs = np.array(pool.map(dense_crf_wrapper, zip(images, probs)))
-            pool.close()
+            if crf:
+                pool = mp.Pool(mp.cpu_count())
+                images = image.data.cpu().numpy().astype(np.uint8).transpose(0, 2, 3, 1)
+                probs = np.array(pool.map(dense_crf_wrapper, zip(images, probs)))
+                pool.close()
             
             oms = np.argmax(probs, axis=1).squeeze(0)
 
@@ -123,4 +124,4 @@ if __name__ == '__main__':
         limit = args.limit
 
     print('\n')
-    inference(cfg, limit)
+    inference(cfg, limit, args.crf)

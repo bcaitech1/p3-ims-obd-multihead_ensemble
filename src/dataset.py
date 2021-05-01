@@ -32,7 +32,7 @@ class RecycleTrashDataset(Dataset):
         
         # cv2 를 활용하여 image 불러오기
         images = cv2.imread(os.path.join(dataset_path, image_infos['file_name']))
-        images = cv2.cvtColor(images, cv2.COLOR_BGR2RGB).astype(np.float32)
+        images = cv2.cvtColor(images, cv2.COLOR_BGR2RGB).astype(np.uint8)
         
         if (self.mode in ('train', 'val')):
             ann_ids = self.coco.getAnnIds(imgIds=image_infos['id'])
@@ -53,13 +53,17 @@ class RecycleTrashDataset(Dataset):
                 masks = np.maximum(self.coco.annToMask(anns[i]) * pixel_value, masks)
             masks = masks.astype(np.float32)
 
+            # one-hot
+            target = np.unique(masks).astype(int)
+            one_hot_label = np.sum(np.eye(12)[target], axis=0)
+
             # transform -> albumentations 라이브러리 활용
             if self.transform is not None:
                 transformed = self.transform(image=images, mask=masks)
                 images = transformed["image"]
                 masks = transformed["mask"]
             
-            return images, masks, image_infos
+            return images, masks, torch.Tensor(one_hot_label), image_infos
         
         if self.mode == 'test':
             # transform -> albumentations 라이브러리 활용

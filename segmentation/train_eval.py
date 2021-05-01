@@ -39,6 +39,8 @@ def main():
     args = parser.parse_args()
     print(args)
 
+    wandb.init(config=args, project="[Pstage-Seg]", name=args.version, save_code=True)
+
     # for reproducibility
     seed_everything(args.seed)
 
@@ -58,18 +60,18 @@ def main():
 
     # define transform
     trn_tfms = A.Compose([
-        # A.HorizontalFlip(p=0.5),
-        # A.VerticalFlip(p=0.5),
-        # A.RandomRotate90(p=0.5),
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.5),
+        A.RandomRotate90(p=0.5),
 
         # A.RandomBrightnessContrast(p=0.5),
         # A.RandomGamma(p=0.5),
         #
-        # A.OneOf([
-        #     A.ElasticTransform(p=1, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03),
-        #     A.GridDistortion(p=1),
-        #     A.OpticalDistortion(distort_limit=1, shift_limit=0.5, p=1),
-        # ], p=0.6),
+        A.OneOf([
+            A.ElasticTransform(p=1, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03),
+            A.GridDistortion(p=1),
+            A.OpticalDistortion(distort_limit=1, shift_limit=0.5, p=1),
+        ], p=0.6),
 
         # A.OneOf([
         #     A.RGBShift(p=1.0),
@@ -131,6 +133,13 @@ def main():
         model = FCN8s(backbone=backbone)
     elif args.model_type == "unet":
         model = smp.Unet(
+            encoder_name="efficientnet-b3",  # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+            encoder_weights="imagenet",
+            in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+            classes=12,  # model output channels (number of classes in your dataset)
+        )
+    elif args.model_type == "unet_pp":
+        model = smp.UnetPlusPlus(
             encoder_name="efficientnet-b3",  # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
             encoder_weights="imagenet",
             in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)

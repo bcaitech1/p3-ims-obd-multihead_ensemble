@@ -168,6 +168,14 @@ def main():
         with open(config_path) as f:
             cfg = yaml.load(f)
         model = get_seg_model(cfg)
+    elif args.model_type == 'hrnet_ocr_tp':
+        import yaml
+        from src.models.hrnet_seg_transpose import get_seg_model
+
+        config_path = './src/configs/hrnet_seg_ocr.yaml'
+        with open(config_path) as f:
+            cfg = yaml.load(f)
+        model = get_seg_model(cfg)
 
     model = model.to(device)
     wandb.watch(model)

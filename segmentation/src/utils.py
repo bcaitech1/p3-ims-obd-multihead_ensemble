@@ -34,6 +34,7 @@ def seed_everything(seed=42):
     # torch.cuda.manual_seed_all(random_seed) # if use multi-GPU
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    # torch.set_deterministic(True)
 
     import imgaug
     imgaug.random.seed(seed)
@@ -189,11 +190,10 @@ class_labels ={
 
 def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, logger, device, beta=0.0, augmix_data=None, debug=True):
     cnt = 1
-    if augmix_data is not None:
-        post_tfms = A.Compose([
-            A.Normalize(),
-            ToTensorV2()
-        ])
+    post_tfms = A.Compose([
+        A.Normalize(),
+        ToTensorV2()
+    ])
 
     model.train()
     trn_losses = []
@@ -207,16 +207,19 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
             images, masks = sample['image'], sample['mask']
             if augmix_data is not None:
                 images, masks = augmix_search(augmix_data.item(), images.numpy().astype(np.float32), masks.numpy())
+            else:
+                images, masks = images.numpy(), masks.numpy()
 
-                i, m = [], []
-                for img, mask in zip(images, masks):
-                    post_tfmsed = post_tfms(image=img, mask=mask)
-                    img, mask = post_tfmsed['image'], post_tfmsed['mask']
-                    i.append(img)
-                    m.append(mask)
+            i, m = [], []
+            for img, mask in zip(images, masks):
+                post_tfmsed = post_tfms(image=img.astype(np.uint8),
+                                        mask=mask.astype(np.uint8))
+                img, mask = post_tfmsed['image'], post_tfmsed['mask']
+                i.append(img)
+                m.append(mask)
 
-                images = torch.stack(i)
-                masks = torch.stack(m)
+            images = torch.stack(i)
+            masks = torch.stack(m)
             images, masks = images.to(device), masks.to(device).long()
 
             if beta > 0:
@@ -228,24 +231,26 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
                     masks[image_idx, bbx1:bbx2, bby1:bby2] = masks[rand_idx, bbx1:bbx2, bby1:bby2]
 
 
-            aux_preds = None
             preds = model(images)
             if isinstance(preds, collections.OrderedDict):
                 preds = preds['out']
             elif isinstance(preds, list):
-                aux_preds, preds = preds
-                ph, pw = preds.size(2), preds.size(3)
-                h, w = masks.size(1), masks.size(2)
-                if ph != h or pw != w:
-                    preds = F.interpolate(input=preds, size=(
-                        h, w), mode='bilinear', align_corners=True)
-                    aux_preds = F.interpolate(input=aux_preds, size=(
-                        h, w), mode='bilinear', align_corners=True)
+                for i in range(len(preds)):
+                    pred = preds[i]
+                    ph, pw = pred.size(2), pred.size(3)
+                    h, w = masks.size(1), masks.size(2)
+                    if ph != h or pw != w:
+                        pred = F.interpolate(input=pred, size=(
+                            h, w), mode='bilinear', align_corners=True)
+                    preds[i] = pred
 
-
-            loss = criterion(preds, masks)
-            if aux_preds is not None:
-                loss += 0.4 * criterion(aux_preds, masks)
+            if isinstance(preds, list):
+                loss = 0
+                for i in range(len(preds)):
+                    loss += criterion(preds[i], masks) * (1/2**i)
+                preds = preds[0]
+            else:
+                loss = criterion(preds, masks)
 
             loss.backward()
             optimizer.step()

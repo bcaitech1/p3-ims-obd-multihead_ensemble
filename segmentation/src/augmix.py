@@ -60,17 +60,22 @@ def augmix_search(augmix_data, images, masks):
         A.Rotate(limit=30, p=0.5),
     ])
 
+    # temp_dict = {
+    #     0: 1, 1: 4, 2: 5, 3: 6, 4: 10, 5: 11
+    # }
+    # num = [1, 4, 5, 6, 10, 11]
     temp_dict = {
-        0: 1, 1: 4, 2: 5, 3: 6, 4: 10, 5: 11
+        0: 4, 1: 5, 2: 6, 3: 10, 4: 11
     }
-    num = [1, 4, 5, 6, 10, 11]
+    num = [4, 5, 6, 10, 11]
 
     temp, search, img = [], [], []
     augmix_img, augmix_mask = [], []
     for idx, i in enumerate(num):
         search.append(np.random.randint(len(augmix_data[i])))
         temp.append(augmix_data[i][search[idx]])
-    idx = random.sample([i for i in range(6)], 3)
+    # idx = random.sample([i for i in range(6)], 3)
+    idx = random.sample([i for i in range(5)], 3)
     for i in range(3):
         img.append(temp[idx[i]])
     mask = np.zeros((3, 512, 512))
@@ -90,7 +95,7 @@ def augmix_search(augmix_data, images, masks):
         elif np.sum(src_imgs != 0) // 3 < 500:
             rs = np.random.uniform(low=8.0, high=9.0)
         else:
-            rs = np.random.uniform(low=0.4, high=0.8)
+            rs = np.random.uniform(low=0.3, high=0.65)
 
         h_list, w_list = np.where(src_mask != 0)
         # max_h, min_h = np.max(h_list), np.min(h_list)

@@ -100,6 +100,13 @@ def main():
             in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
             classes=12,  # model output channels (number of classes in your dataset)
         )
+    elif args.model_type == "unet_pp":
+        model = smp.UnetPlusPlus(
+            encoder_name="efficientnet-b3",  # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+            encoder_weights="imagenet",
+            in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+            classes=12,  # model output channels (number of classes in your dataset)
+        )
     elif args.model_type == 'deeplabv3':
         model = smp.DeepLabV3(
             encoder_name='efficientnet-b0',
@@ -138,7 +145,7 @@ def main():
             # inference (512 x 512)
             preds = model(imgs.to(device))
             if isinstance(preds, list):
-                aux_preds, preds = preds
+                preds = preds[0]
                 ph, pw = preds.size(2), preds.size(3)
                 if ph != tar_size or pw != tar_size:
                     preds = F.interpolate(input=preds, size=(

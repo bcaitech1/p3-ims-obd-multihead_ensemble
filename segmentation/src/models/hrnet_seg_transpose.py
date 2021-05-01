@@ -483,6 +483,19 @@ class HighResolutionNet(nn.Module):
             BatchNorm2d(ocr_mid_channels),
             nn.ReLU(inplace=relu_inplace),
         )
+
+        # self.conv3x3_ocr2 = nn.Sequential(
+        #     nn.ConvTranspose2d(ocr_mid_channels, ocr_mid_channels//2, kernel_size=2, stride=2),
+        #     BatchNorm2d(ocr_mid_channels//2),
+        #     nn.ReLU(inplace=relu_inplace),
+        #
+        #     nn.Conv2d(ocr_mid_channels//2, ocr_mid_channels,
+        #               kernel_size=3, stride=1, padding=1),
+        #     BatchNorm2d(ocr_mid_channels),
+        #     nn.ReLU(inplace=relu_inplace),
+        # )
+
+
         self.ocr_gather_head = SpatialGather_Module(config['DATASET']['NUM_CLASSES'])
 
         self.ocr_distri_head = SpatialOCR_Module(in_channels=ocr_mid_channels,
@@ -491,8 +504,26 @@ class HighResolutionNet(nn.Module):
                                                  scale=1,
                                                  dropout=0.05,
                                                  )
-        self.cls_head = nn.Conv2d(
-            ocr_mid_channels, config['DATASET']['NUM_CLASSES'], kernel_size=1, stride=1, padding=0, bias=True)
+
+        self.cls_head = nn.Sequential(
+            nn.ConvTranspose2d(ocr_mid_channels, ocr_mid_channels//3, kernel_size=2, stride=2, bias=False),
+            BatchNorm2d(ocr_mid_channels//3),
+            nn.ReLU(inplace=relu_inplace),
+
+            nn.ConvTranspose2d(ocr_mid_channels//3, ocr_mid_channels//3, kernel_size=2, stride=2, bias=False),
+            BatchNorm2d(ocr_mid_channels//3),
+            nn.ReLU(inplace=relu_inplace),
+
+            nn.Conv2d(ocr_mid_channels//3, config['DATASET']['NUM_CLASSES'], kernel_size=1, stride=1, padding=0, bias=True)
+        )
+
+        # self.aux_head2 = nn.Sequential(
+        #         nn.ConvTranspose2d(ocr_mid_channels, ocr_mid_channels//2, kernel_size=2, stride=2, bias=False),
+        #         BatchNorm2d(ocr_mid_channels//2),
+        #         nn.ReLU(inplace=relu_inplace),
+        #
+        #         nn.Conv2d(ocr_mid_channels//2, config['DATASET']['NUM_CLASSES'], kernel_size=1, stride=1, padding=0, bias=True)
+        # )
 
         self.aux_head = nn.Sequential(
             nn.Conv2d(last_inp_channels, last_inp_channels,
@@ -503,11 +534,6 @@ class HighResolutionNet(nn.Module):
                       kernel_size=1, stride=1, padding=0, bias=True)
         )
 
-        # self.deconv1 = nn.Sequential(
-        #     nn.ConvTranspose2d(),
-        #     BatchNorm2d(last_inp_channels),
-        #     nn.ReLU(inplace=relu_inplace),
-        # )
 
     def _make_transition_layer(
             self, num_channels_pre_layer, num_channels_cur_layer):
@@ -644,17 +670,23 @@ class HighResolutionNet(nn.Module):
         out_aux_seg = []
 
         # ocr
-        out_aux = self.aux_head(feats)
-        # compute contrast feature
+        out_aux1 = self.aux_head(feats)
         feats = self.conv3x3_ocr(feats)
 
-        context = self.ocr_gather_head(feats, out_aux)
+        context = self.ocr_gather_head(feats, out_aux1)
         feats = self.ocr_distri_head(feats, context)
+
+        # out_aux2 = self.aux_head2(feats)
+        # feats = self.conv3x3_ocr2(feats)
+        #
+        # context = self.ocr_gather_head(feats, out_aux2)
+        # feats = self.ocr_distri_head(feats, context)
 
         out = self.cls_head(feats)
 
         out_aux_seg.append(out)
-        out_aux_seg.append(out_aux)
+        out_aux_seg.append(out_aux1)
+        # out_aux_seg.append(out_aux2)
 
         return out_aux_seg
 
@@ -708,6 +740,8 @@ if __name__ == "__main__":
 
     # model = model
     model.eval()
-    tmp_inp = torch.zeros((1, 3, 256, 256)).float()# .cuda()
+    tmp_inp = torch.zeros((1, 3, 512, 512)).float()# .cuda()
     output = model(tmp_inp)
-    # # of params: 70,364,040
+    for out in output:
+        print(out.shape)
+    # # of params: 71,676,808

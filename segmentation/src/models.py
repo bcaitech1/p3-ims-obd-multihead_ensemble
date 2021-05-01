@@ -44,7 +44,7 @@ class DeepLabV3Plus(nn.Module):
     def __init__(self, num_classes=12):
         super(DeepLabV3Plus, self).__init__()
         self.model = smp.DeepLabV3Plus(
-            encoder_name='efficientnet-b0',
+            encoder_name='efficientnet-b3',
             encoder_weights='imagenet',
             in_channels=3,
             classes=num_classes

@@ -3,6 +3,8 @@ import torch.optim as optim
 from torchvision import models
 from torchvision.models import vgg16
 
+import segmentation_models_pytorch as smp
+
 class FCN8s(nn.Module):
     def __init__(self, num_classes):
         super(FCN8s,self).__init__()
@@ -80,3 +82,38 @@ class FCN8s(nn.Module):
         
         return upscore8
 
+
+class DeepLabV3(nn.Module):
+    def __init__(self, num_classes=12):
+        super(DeepLabV3, self).__init__()
+        self.model = smp.DeepLabV3(
+            encoder_name='efficientnet-b0',
+            encoder_weights='imagenet',
+            in_channels=3,
+            classes=num_classes,
+        )
+    def forward(self, x):
+        return self.model(x)
+
+class DeepLabv3Plus(nn.Module):
+    def __init__(self, num_classes=12):
+        super(DeepLabv3Plus, self).__init__()
+        self.model = smp.DeepLabV3Plus(encoder_name="efficientnet-b3",
+                encoder_weights="imagenet",
+                in_channels=3,
+                classes=12,
+                )
+    def forward(self, x):
+        return self.model(x)
+
+class UnetPlusPlus(nn.Module):
+    def __init__(self, num_classes=12):
+        super(UnetPlusPlus, self.__init__())
+        self.model = smp.UnetPlusPlus(
+            encoder_name="efficientent-b3",
+            encoder_weights="imagenet",
+            in_channels=3,
+            classes=num_classes,
+            )
+    def forward(self, x):
+        return self.model(x)

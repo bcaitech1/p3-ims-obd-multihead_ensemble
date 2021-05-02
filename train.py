@@ -2,6 +2,7 @@ import os
 import random
 import time
 import json
+import pickle
 import warnings 
 import time
 warnings.filterwarnings('ignore')
@@ -30,10 +31,11 @@ import segmentation_models_pytorch as smp
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-from src.dataset import *
-from src.models import *
-from src.utils import *
-from src.losses import *
+from src.dataset import CustomDataLoader
+# from src.models import FCN8s
+from src.utils import seed_everything, make_dir, save_model, label_accuracy_score_batch, label_accuracy_score, add_hist, CosineAnnealingWarmupRestarts, get_lr, save_pickle
+from src.losses import DiceCELoss
+from src.models import DeepLabv3Plus, DeepLabV3
 
 print('pytorch version: {}'.format(torch.__version__))
 print('GPU 사용 가능 여부: {}'.format(torch.cuda.is_available()))
@@ -56,8 +58,10 @@ def train(args):
 
     # train.json / validation.json / test.json 디렉토리 설정
     
+    dataset_path = '../input/data'
     train_path = dataset_path + '/train.json'
     val_path = dataset_path + '/val.json'
+    
     # collate_fn needs for batch
     def collate_fn(batch):
         return tuple(zip(*batch))
@@ -108,37 +112,44 @@ def train(args):
                                             collate_fn=collate_fn,
                                             drop_last=True)
 
-    # 구현된 model에 임의의 input을 넣어 output이 잘 나오는지 test
+    # model = DeepLabv3Plus()
+    model = DeepLabV3()
 
-    # model = FCN8s(num_classes=12)
+    # model = smp.DeepLabV3(
+    #         encoder_name='efficientnet-b0',
+    #         encoder_weights='imagenet',
+    #         in_channels=3,
+    #         classes=12,
+    # )
 
-    model = smp.DeepLabV3(encoder_name="efficientnet-b0",
-                # encoder_depth=5,
-                encoder_weights="imagenet",
-                in_channels=3,
-                classes=12,
-                )
+    # print("#" * 10)
+    # print(model.parameters)
+    # print("#" * 10)
+
 
     if args.is_load:           
         load_model_path = os.path.join(args.load_path, args.file_name)
         load_model(load_model_path, device)
         print("finish load model !!!")
 
-#     model = smp.Unet(
-#     encoder_name="efficientnet-b0",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
-#     encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
-#     in_channels=3,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
-#     classes=12,                      # model output channels (number of classes in your dataset)
-# )
-
-    # print("output shape : ", out.size())
-
     model = model.to(device)
     criterion = DiceCELoss()
     # criterion = smp.losses.DiceLoss('multiclass')
 
     # Optimizer 정의
-    optimizer = AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = AdamW(params=model.parameters(), lr=args.max_lr, weight_decay=args.weight_decay)
+
+    first_cycle_steps = len(train_loader) * args.epochs // 3
+    
+    scheduler = CosineAnnealingWarmupRestarts(
+            optimizer, 
+            first_cycle_steps=first_cycle_steps, 
+            cycle_mult=1.0, 
+            max_lr=args.max_lr, 
+            min_lr=args.min_lr, 
+            warmup_steps=int(first_cycle_steps * 0.25), 
+            gamma=0.5
+        )
 
     log_dir = make_dir(args.log_dir)
     logger = SummaryWriter(log_dir=log_dir)
@@ -154,6 +165,8 @@ def train(args):
         val_loss = 0.0
         best_loss = float('inf')
         best_iou = 0.0
+
+        lr_list = []
 
         model.train()
         for step, (images, masks, _) in enumerate(tqdm(train_loader)):
@@ -172,6 +185,10 @@ def train(args):
             
             loss.backward()
             optimizer.step()
+            # scheduler.step()
+            # lr_list.append(scheduler.get_lr()[0])
+            lr_list.append(get_lr(optimizer))
+            save_pickle(lr_list, "/opt/ml/my_code/lr.pickle")
 
             outputs = torch.argmax(outputs.squeeze(), dim=1).detach().cpu().numpy()
 
@@ -192,7 +209,6 @@ def train(args):
         print("\n Start validation step!")
         model.eval()
         hist = np.zeros((12, 12))
-        mIoU_list = []
         with torch.no_grad():
             for step, (images, masks, _) in enumerate(tqdm(val_loader)):
                 images = torch.stack(images).to(device)       # (batch, channel, height, width)
@@ -204,37 +220,39 @@ def train(args):
                 
                 outputs = torch.argmax(outputs, dim=1).detach().cpu().numpy()
 
-                temp = label_accuracy_score_batch(masks.detach().cpu().numpy(), outputs, n_class=12)[2]
-                mIoU_list.append(temp)
-
                 hist = add_hist(hist, masks.detach().cpu().numpy(), outputs, n_class=12)
 
         val_iou = label_accuracy_score(hist)[2]
             
         print(f"[Val] epoch {epoch + 1} | val_loss {val_loss / (step + 1):.4f} | val_iou {val_iou:.4f}")
-        print("mIoU list mean: ", np.mean(mIoU_list))
         logger.add_scalar("Val/loss", val_loss / (step + 1), epoch)
         logger.add_scalar("Val/mIoU", val_iou, epoch)
         
         if val_iou >= best_iou:
             best_iou = val_iou
-            print(f"Best performance at epoch: {epoch + 1:.4f}", "mIoU: ", best_iou)
+            print(f"Best performance at epoch: {epoch + 1}, mIoU: {best_iou:.4f}")
             save_model(model, saved_dir, args.file_name)
+
+    # save
+    with open('lr.pickle', 'wb') as f:
+        pickle.dump(lr_list, f, pickle.HIGHEST_PROTOCOL)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--epochs', type=int, default=20)
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--epochs', type=int, default=25)
     parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument("--max_lr", type=float, default=1e-4)
+    parser.add_argument("--min_lr", type=float, default=1e-5)
     parser.add_argument("--weight_decay", type=float, default=1e-6)
     parser.add_argument("--log_step", type=int, default=20)
     parser.add_argument("--log_dir", type=str, default="./logs")
     
     parser.add_argument("--saved_dir", type=str, default="./checkpoints")
     parser.add_argument("--file_name", type=str, default="deeplabv3.pt")
-    parser.add_argument("--load_path", type=str, default="./checkpoints/exp2")
+    parser.add_argument("--load_path", type=str, default="./checkpoints/exp7")
     parser.add_argument("--is_load", type=bool, default=False)
 
     args = parser.parse_args()

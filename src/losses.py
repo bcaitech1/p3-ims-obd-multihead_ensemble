@@ -33,7 +33,7 @@ class DiceCELoss(nn.Module):
     def __init__(self, weight=None, size_average=True):
         super(DiceCELoss, self).__init__()
 
-    def forward(self, inputs, targets, smooth=1):
+    def forward(self, inputs, targets, gamma=0.75, smooth=1):
         # flatten label and prediction tensors
         num_classes = inputs.size(1)
         true_1_hot = torch.eye(num_classes)[targets]
@@ -49,7 +49,7 @@ class DiceCELoss(nn.Module):
         dice_loss = (1 - dice_loss)
 
         ce = F.cross_entropy(inputs, targets, reduction='mean')
-        dice_bce = ce * 0.8 + dice_loss * 0.2
+        dice_bce = ce * gamma + dice_loss * (1 - gamma)
         return dice_bce
 
 

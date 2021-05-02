@@ -1,17 +1,22 @@
-from torch.utils.data import DataLoader
-import pandas as pd
-import torch
-import pickle as pickle
-import numpy as np
-import argparse
 import os
+import argparse
+import pandas as pd
+import numpy as np
+import pickle as pickle
+import multiprocessing as mp
 from tqdm import tqdm
-from src.dataset import *
-from src.models import *
+
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
 
 from albumentations import *
 from albumentations.pytorch import ToTensorV2
 import segmentation_models_pytorch as smp
+
+from src.dataset import *
+from src.models import *
+from src.utils import dense_crf_wrapper
 
 
 def inference(args):
@@ -22,6 +27,8 @@ def inference(args):
     test_path = dataset_path + '/test.json'
 
     test_transform = A.Compose([
+                            A.Normalize(),
+                            A.Resize(256, 256),
                             ToTensorV2()
                             ])
 
@@ -36,15 +43,15 @@ def inference(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # model = FCN8s(num_classes=12)
-    model = smp.DeepLabV3(encoder_name="efficientnet-b0",
-            encoder_depth=5,
-            encoder_weights="imagenet",
-            in_channels=3,
-            classes=args.num_classes,
-            )
+    model = smp.DeepLabV3Plus(encoder_name="efficientnet-b3",
+                            encoder_weights="imagenet",
+                            in_channels=3,
+                            classes=12,
+                            )
+
     model = model.to(device)
 
-    model_path = os.path.join(args.saved_dir, args.file_name)
+    model_path = os.path.join(args.saved_dir, args.model_name + ".pt")
     checkpoint = torch.load(model_path, map_location=device)
     model.load_state_dict(checkpoint)
 
@@ -60,8 +67,18 @@ def inference(args):
         for step, (imgs, image_infos) in enumerate(tqdm(test_loader)):
 
             # inference (512 x 512)
-            outs = model(torch.stack(imgs).to(device))
-            oms = torch.argmax(outs.squeeze(), dim=1).detach().cpu().numpy()
+            outs = model(torch.stack(imgs).float().to(device))
+
+            if args.is_crf:
+                probs = F.softmax(outs, dim=1).data.cpu().numpy()
+
+                pool = mp.Pool(mp.cpu_count())
+                images = torch.stack(imgs).data.cpu().numpy().astype(np.uint8).transpose(0, 2, 3, 1)
+                probs = np.array(pool.map(dense_crf_wrapper, zip(images, probs)))
+                pool.close()
+                oms = np.argmax(probs, axis=1)
+            else:
+                oms = torch.argmax(outs.squeeze(), dim=1).detach().cpu().numpy()
             
             # resize (256 x 256)
             temp_mask = []
@@ -93,18 +110,17 @@ def inference(args):
                                     ignore_index=True)
 
     # submission.csv로 저장
-    submission.to_csv(os.path.join(args.submission_dir, args.submission_name), index=False)
+    submission.to_csv(os.path.join(args.submission_dir, args.model_name + "csv"), index=False)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--saved_dir", type=str, default="./checkpoints/exp3")
-    parser.add_argument("--file_name", type=str, default="deeplabv3.pt")
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--saved_dir", type=str, default="./checkpoints/exp4")
     parser.add_argument("--submission_dir", type=str, default="./submission")
-    parser.add_argument("--submission_name", type=str, default="deeplabv3.csv")
-    parser.add_argument("--num_classes", type=int, default=12)
+    parser.add_argument("--model_name", type=str, default="deeplabv3p")
+    parser.add_argument("--is_crf", type=bool, default=True)
 
     args = parser.parse_args()
     

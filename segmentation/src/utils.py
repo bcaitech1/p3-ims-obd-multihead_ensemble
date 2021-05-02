@@ -133,9 +133,49 @@ def save_model(model, version, save_type='loss'):
     save_dir = os.path.join(save_path, f'best_{save_type}.pth')
     torch.save(model.state_dict(), save_dir)
 
+def Cutout(n_holes , length , imgs, label):
+    h = imgs.size(2)
+    w = imgs.size(3)
+    for idx, img in enumerate(imgs):
+        mask = np.ones((h, w), np.float32)
+        for n in range(n_holes):
+            y = np.random.randint(h)
+            x = np.random.randint(w)
+            y1 = np.clip(y - length // 2, 0, h)
+            y2 = np.clip(y + length // 2, 0, h)
+            x1 = np.clip(x - length // 2, 0, w)
+            x2 = np.clip(x + length // 2, 0, w)
+
+            mask[y1: y2, x1: x2] = 0.
+            mask[y1: y2, x1: x2] = np.where(label[idx][y1: y2, x1: x2] > 0 , 1, mask[y1: y2, x1: x2]) ## background 아니면 살림
+
+        mask = torch.from_numpy(mask)
+        mask = mask.expand_as(img)
+
+        imgs[idx] = img * mask
+            
+    return imgs
+
+def rand_bbox(size, lam):
+    W = size[2]
+    H = size[3]
+    # cut_rat = np.sqrt(1. - lam)
+    # cut_w = np.int(W * cut_rat)
+    # cut_h = np.int(H * cut_rat)
+
+    # # uniform
+    # cx = np.random.randint(W)
+    # cy = np.random.randint(H)
+
+    # bbx1 = np.clip(cx - cut_w // 2, 0, W)
+    # bby1 = np.clip(cy - cut_h // 2, 0, H)
+    # bbx2 = np.clip(cx + cut_w // 2, 0, W)
+    # bby2 = np.clip(cy + cut_h // 2, 0, H)
+    bbx1 , bby1, bbx2 , bby2 = 0, 0, int(W/2),int(H)
+    return bbx1, bby1, bbx2, bby2
 
 import time
-def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, logger, device, scheduler=None, cutout_prob = 0,  debug=False):
+def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, logger, device, scheduler=None, cutout = 0, cutmix = 0 , augmix_data = None ,  debug=False):
     cnt = 1
     model.train()
     trn_losses = []
@@ -148,9 +188,20 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, logger, devi
             optimizer.zero_grad()
             images, masks = sample['image'], sample['mask']
 
-            # r = np.random.rand(1)
-            # if cutout_prob and cutout_prob > r:
-            #     images = Cutout(2, 50 ,images, masks) # holes  , size
+            # if augmix_data is not None:
+            #     images, masks = augmix_search(augmix_data.item(), images.numpy().astype(np.float32), masks.numpy())
+
+            r = np.random.rand(1)
+            if cutout and cutout > r:
+                images = Cutout(8, 10 ,images, masks) # holes  , size
+
+            if cutmix and cutmix > r:
+                # generate mixed sample
+                lam = np.random.beta(1., 1.)
+                rand_index = torch.randperm(images.size()[0]).to(device)
+                bbx1, bby1, bbx2, bby2 = rand_bbox(images.size(), lam)
+                images[:, :, bbx1:bbx2, bby1:bby2] = images[rand_index, :, bbx1:bbx2, bby1:bby2]
+                masks[:, bbx1:bbx2, bby1:bby2] = masks[rand_index, bbx1:bbx2, bby1:bby2]
 
             images, masks = images.to(device), masks.to(device).long()
 
@@ -224,28 +275,7 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, logger, devi
 
     return np.mean(trn_losses), trn_mIoU, np.mean(val_losses), val_mIoU
 
-    def Cutout(n_holes , length , imgs, label):
-        h = imgs.size(2)
-        w = imgs.size(3)
-        for idx, img in enumerate(imgs):
-            mask = np.ones((h, w), np.float32)
-            for n in range(n_holes):
-                y = np.random.randint(h)
-                x = np.random.randint(w)
-                y1 = np.clip(y - length // 2, 0, h)
-                y2 = np.clip(y + length // 2, 0, h)
-                x1 = np.clip(x - length // 2, 0, w)
-                x2 = np.clip(x + length // 2, 0, w)
 
-                mask[y1: y2, x1: x2] = 0.
-                mask[y1: y2, x1: x2] = np.where(label[idx][y1: y2, x1: x2] > 0 , 1, mask[y1: y2, x1: x2]) ## background 아니면 살림
-
-            mask = torch.from_numpy(mask)
-            mask = mask.expand_as(img)
-
-            imgs[idx] = img * mask
-                
-        return imgs
 
 
 class GridMask(DualTransform):
@@ -343,3 +373,34 @@ class GridMask(DualTransform):
 
     def get_transform_init_args_names(self):
         return ('num_grid', 'fill_value', 'rotate', 'mode')
+
+
+
+import random
+import matplotlib.pyplot as plt
+import sys
+def hide_patch(img):
+    # get width and height of the image
+    s = img.shape
+    wd = s[0]
+    ht = s[1]
+
+    # possible grid size, 0 means no hiding
+    grid_sizes=[0,16,32,44,56]
+
+    # hiding probability
+    hide_prob = 0.5
+ 
+    # randomly choose one grid size
+    grid_size= grid_sizes[random.randint(0,len(grid_sizes)-1)]
+
+    # hide the patches
+    if(grid_size > 0):
+         for x in range(0,wd,grid_size):
+             for y in range(0,ht,grid_size):
+                 x_end = min(wd, x+grid_size)  
+                 y_end = min(ht, y+grid_size)
+                 if(random.random() <=  hide_prob):
+                       img[x:x_end,y:y_end,:]=0
+
+    return img

@@ -36,7 +36,9 @@ def main():
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--num_workers', default='3', type=int)
     parser.add_argument('--cutout', default=0 , type=float)
+    parser.add_argument('--cutmix', default=0 , type=float)
     parser.add_argument('--early_stop', default=3 , type=int)
+    parser.add_argument('--augmix_prob', default=0 , type=float)
     
     # Model & Optimizer & Criterion.. 
     parser.add_argument('--model_type', default='FCN8s', type=str , help = 'ex) Unet , DeepLabV3, FCN8s ,SegNet,Effi_Unet_NS')
@@ -44,9 +46,10 @@ def main():
     parser.add_argument('--optimizer', default='AdamW', type=str , help = 'ex) torch.optim.Adamw')
     parser.add_argument('--scheduler', default='None', type=str , help = 'ex) torch.optim.lr_scheduler.StepLR')
     parser.add_argument('--aug', default='None', type=str , help = 'ex) torch.optim.lr_scheduler.StepLR')
-
+    parser.add_argument('--use_augmix', default=False, type=bool , help = 'ex) torch.optim.lr_scheduler.StepLR')
+   
     # container environment
-    parser.add_argument('--data_path', default='/opt/ml/input/data', type=str)
+    parser.add_argument('--data_path', default='/content/input', type=str)
     parser.add_argument('--version', default='v1', type=str)
 
     args = parser.parse_args()
@@ -58,76 +61,116 @@ def main():
     mean = np.array([0.46098186, 0.44022841, 0.41892368], dtype=np.float32)
     std  = np.array([0.21072529, 0.20763867, 0.21613272], dtype=np.float32)
 
-  
+
+    ## 여기서 npy 파일 있는 path 설정해주세요!!!!!! 
+    ## parser로 준 augmix_prob & use_augmix 설정해주셔야돼요
+    augmix_path = '/content/drive/MyDrive/code/augmix.npy'
+
+    if args.use_augmix:
+        np_load_old = np.load
+        np.load = lambda *a, **k: np_load_old(*a, allow_pickle=True, **k)
+        augmix_data = np.load(augmix_path)
+        augmix_data = augmix_data.item()
+
+    else:
+        augmix_data = None
+ 
+
     # define transform
-    if args.aug == 'flip':
-      trn_tfms = A.Compose([
-          A.Resize (256, 256 , p=1),
-          A.HorizontalFlip(p=1),
-          A.Normalize(),
-          ToTensorV2()
-      ])
+    # if args.aug == 'flip':
+    #   trn_tfms = A.Compose([
+    #       A.Resize (256, 256 , p=1),
+    #       A.HorizontalFlip(p=1),
+    #       A.Normalize(),
+    #       ToTensorV2()
+    #   ])
 
-    elif args.aug == 'rotate':
-      trn_tfms = A.Compose([
-          A.Resize (256, 256 , p=1),
-          A.RandomRotate90 (p=0.5),
-          A.Normalize(),
-          ToTensorV2()
-      ])
+    # elif args.aug == 'rotate':
+    #   trn_tfms = A.Compose([
+    #       A.Resize (256, 256 , p=1),
+    #       A.RandomRotate90 (p=0.5),
+    #       A.Normalize(),
+    #       ToTensorV2()
+    #   ])
 
-    elif args.aug == 'gridmask':
-      trn_tfms = A.Compose([
-          A.Resize (256, 256 , p=1),
-          GridMask(num_grid = 4),
-          A.Normalize(),
-          ToTensorV2()
-      ])
+    # elif args.aug == 'rotate30':
+    #   trn_tfms = A.Compose([
+    #       A.Resize (256, 256 , p=1),
+    #       A.Rotate (limit = 30, p=0.5),
+    #       A.Normalize(),
+    #       ToTensorV2()
+    #   ])
 
-    elif args.aug == 'Cutout':
-      trn_tfms = A.Compose([
-          A.Resize (256, 256 , p=1),
-          A.Cutout (num_holes=4, max_h_size=20, max_w_size=20,p=0.5),
-          A.Normalize(),
-          ToTensorV2()
-      ])
+    # elif args.aug == 'gridmask':
+    #   trn_tfms = A.Compose([
+    #       A.Resize (256, 256 , p=1),
+    #       GridMask(num_grid = 4),
+    #       A.Normalize(),
+    #       ToTensorV2()
+    #   ])
 
-    elif args.aug == 'randomresize':
-      trn_tfms = A.Compose([
+    # elif args.aug == 'Cutout':
+    #   trn_tfms = A.Compose([
+    #       A.Resize (256, 256 , p=1),
+    #       A.Cutout (num_holes=4, max_h_size=20, max_w_size=20,p=0.5),
+    #       A.Normalize(),
+    #       ToTensorV2()
+    #   ])
+
+    # elif args.aug == 'randomresize':
+    #   trn_tfms = A.Compose([
+    #       A.Resize (256, 256 , p=0.5),
+    #       A.RandomResizedCrop(256,256),
+    #       A.Normalize(),
+    #       ToTensorV2()
+    #   ])
+
+    # elif args.aug == 'clahe':
+    #   trn_tfms = A.Compose([
+    #       A.Resize (256, 256 , p=1),
+    #       A.CLAHE(p=1),
+    #       A.Normalize(),
+    #       ToTensorV2()
+    #   ])
+
+    # elif args.aug == 'griddistortion':
+    #   trn_tfms = A.Compose([
+    #       A.Resize (256, 256 , p=1),
+    #       A.GridDistortion(p=0.5),
+    #       A.Normalize(),
+    #       ToTensorV2()
+    #   ])
+
+    # elif args.aug == 'optical':
+    #   trn_tfms = A.Compose([
+    #       A.Resize (256, 256 , p=1),
+    #       A.OpticalDistortion(distort_limit=2, shift_limit=0.5, p=0.5),
+    #       A.Normalize(),
+    #       ToTensorV2()
+    #   ])
+
+    # elif args.aug == 'elastic':
+    #   trn_tfms = A.Compose([
+    #       A.Resize (256, 256 , p=1),
+    #       A.ElasticTransform(p=0.5, alpha=30, sigma=120 * 0.05, alpha_affine=120 * 0.03),
+    #       A.Normalize(),
+    #       ToTensorV2()
+    #   ])
+
+    # elif args.aug == 'has':
+    #   trn_tfms = A.Compose([
+    #       A.Resize (256, 256 , p=1),
+    #       A.ElasticTransform(p=0.5, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03),
+    #       A.Normalize(),
+    #       ToTensorV2()
+    #   ])
+    # else :
+
+    trn_tfms = A.Compose([
           A.Resize (256, 256 , p=1),
           A.RandomResizedCrop(256,256),
-          A.Normalize(),
-          ToTensorV2()
-      ])
-
-    elif args.aug == 'clahe':
-      trn_tfms = A.Compose([
-          A.Resize (256, 256 , p=1),
+          A.Rotate (limit = 30, p=0.5),
           A.CLAHE(p=1),
-          A.Normalize(),
-          ToTensorV2()
-      ])
-
-    elif args.aug == 'griddistortion':
-      trn_tfms = A.Compose([
-          A.Resize (256, 256 , p=0.5),
-          A.GridDistortion(p=1),
-          A.Normalize(),
-          ToTensorV2()
-      ])
-
-    elif args.aug == 'optical':
-      trn_tfms = A.Compose([
-          A.Resize (256, 256 , p=1),
-          A.OpticalDistortion(distort_limit=2, shift_limit=0.5, p=0.5),
-          A.Normalize(),
-          ToTensorV2()
-      ])
-
-    elif args.aug == 'elastic':
-      trn_tfms = A.Compose([
-          A.Resize (256, 256 , p=1),
-          A.ElasticTransform(p=0.5, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03),
           A.Normalize(),
           ToTensorV2()
       ])
@@ -138,7 +181,7 @@ def main():
         ToTensorV2()
     ])
 
-
+    
     # define train & valid dataset
     if args.trn_ratio:
         total_annot = os.path.join(args.data_path, 'train_all.json')
@@ -155,9 +198,8 @@ def main():
         trn_cat = make_cat_df(trn_annot, debug=True)
         val_cat = make_cat_df(val_annot, debug=True)
 
-        trn_ds = SegmentationDataset(data_dir=trn_annot, cat_df=trn_cat, mode='train', transform=trn_tfms)
+        trn_ds = SegmentationDataset(data_dir=trn_annot, cat_df=trn_cat, mode='train', transform=trn_tfms , augmix = augmix_data , prob = args.augmix_prob)
         val_ds = SegmentationDataset(data_dir=val_annot, cat_df=val_cat, mode='valid', transform=val_tfms)
-
 
     # define dataloader
     trn_dl = DataLoader(dataset=trn_ds,
@@ -212,7 +254,7 @@ def main():
         
         if early_cnt >= args.early_stop : break
             
-        trn_loss, trn_mIoU, val_loss, val_mIoU = train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, logger, device, scheduler, args.cutout)
+        trn_loss, trn_mIoU, val_loss, val_mIoU = train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, logger, device, scheduler, args.cutout, args.cutmix, augmix_data )
         ## 
         wandb.log({"loss": val_loss , "IoU" :val_mIoU })
 

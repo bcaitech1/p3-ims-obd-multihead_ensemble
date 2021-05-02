@@ -4,6 +4,7 @@ import numpy as np
 from pycocotools.coco import COCO
 
 import torch
+import random
 from torch.utils.data import Dataset
 
 
@@ -17,7 +18,7 @@ def get_classname(classID, cats):
 class SegmentationDataset(Dataset):
     """COCO format"""
 
-    def __init__(self, data_dir, cat_df, mode='train', num_cls=12, transform=None):
+    def __init__(self, data_dir, cat_df, mode='train', num_cls=12, transform=None, augmix=None):
         super().__init__()
         self.mode = mode
         self.num_cls = num_cls
@@ -25,6 +26,9 @@ class SegmentationDataset(Dataset):
         self.coco = COCO(data_dir)
         self.ds_path = f'{os.sep}'.join(data_dir.split(os.sep)[:-1])
         self.category_names = list(cat_df.Categories)
+
+        self.augmix = augmix
+        self.prob = 0.5
 
     def __getitem__(self, index: int):
         # dataset이 index되어 list처럼 동작
@@ -54,6 +58,11 @@ class SegmentationDataset(Dataset):
                 masks = np.maximum(self.coco.annToMask(anns[i]) * pixel_value, masks)
             masks = masks.astype(np.float32)
 
+            if self.augmix is not None:
+                r = np.random.rand(1)
+                if r < self.prob:
+                    images, masks = self.augmix_search(images, masks)
+
             # transform -> albumentations 라이브러리 활용
             if self.transform is not None:
                 transformed = self.transform(image=images, mask=masks)
@@ -80,6 +89,27 @@ class SegmentationDataset(Dataset):
     def __len__(self) -> int:
         # 전체 dataset의 size를 return
         return len(self.coco.getImgIds())
+
+    def augmix_search(self, images, masks):
+        temp_dict = {
+            0: 4, 1: 5, 2: 6, 3: 10, 4: 11
+        }
+        num = [4, 5, 6, 10, 11]
+
+        label = random.choice(num)
+        idx = np.random.randint(len(self.augmix[label]))
+        augmix_img = self.augmix[label][idx]
+
+        augmix_mask = np.zeros((512, 512))
+        augmix_mask[augmix_img[:, :, 0] != 0] = label  # augmix img가 있는 만큼 label로 mask를 채워줌
+
+        images[augmix_img != 0] = augmix_img[augmix_img != 0]
+        masks[augmix_mask != 0] = augmix_mask[augmix_mask != 0]
+
+        return images, masks
+
+
+
 
 
 if __name__ == "__main__":

@@ -130,3 +130,4 @@ debug
 *.csv
 pretrained
 kfold_json
+ckpts

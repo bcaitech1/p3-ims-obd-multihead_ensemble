@@ -29,12 +29,12 @@ def dense_crf_wrapper(args):
     return dense_crf(args[0], args[1])
 
 def dense_crf(img, output_probs):
-    MAX_ITER = 10
+    MAX_ITER = 50
     POS_W = 3
-    POS_XY_STD = 1
+    POS_XY_STD = 3
     Bi_W = 4
-    Bi_XY_STD = 67
-    Bi_RGB_STD = 3
+    Bi_XY_STD = 49
+    Bi_RGB_STD = 5
 
     c = output_probs.shape[0]
     h = output_probs.shape[1]
@@ -60,7 +60,7 @@ def main():
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--batch_size', default=2, type=int)
     parser.add_argument('--postfix', default='effib3_unet_v1', type=str)
-    parser.add_argument('--ckpt', default='effib3_unet_v1/best_mIoU.pth', type=str)
+    parser.add_argument('--ckpt', default='effib3_unet_v1/best_mIoU_56_448.pth', type=str)
     parser.add_argument('--model_type', default='unet', type=str)
     parser.add_argument('--debug', default=0, type=int)
 
@@ -122,6 +122,14 @@ def main():
         with open(config_path) as f:
             cfg = yaml.load(f)
             cfg['MODEL']['PRETRAINED'] = ''
+        model = get_seg_model(cfg)
+    elif args.model_type == 'hrnet_ocr_tp':
+        import yaml
+        from src.models.hrnet_seg_transpose import get_seg_model
+
+        config_path = './src/configs/hrnet_seg_ocr.yaml'
+        with open(config_path) as f:
+            cfg = yaml.load(f)
         model = get_seg_model(cfg)
 
     model = model.to(device)

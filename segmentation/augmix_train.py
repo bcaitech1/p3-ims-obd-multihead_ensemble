@@ -51,9 +51,11 @@ def main():
     data_path = os.path.join(main_path, 'input', 'data')
     augmix_path = os.path.join(main_path, 'input', 'aug.npy')
     if args.use_augmix:
+        print("Use SeoungBaeMix\n")
         np_load_old = np.load
         np.load = lambda *a, **k: np_load_old(*a, allow_pickle=True, **k)
         augmix_data = np.load(augmix_path)
+        augmix_data = augmix_data.item()
     else:
         augmix_data = None
 
@@ -64,12 +66,15 @@ def main():
     trn_tfms = A.Compose([
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
-        A.RandomRotate90(p=0.5),
+        A.OneOf([
+            A.RandomRotate90(p=0.5),
+            A.Rotate(limit=30, p=0.5),
+        ], p=0.5),
 
         # A.RandomBrightnessContrast(p=0.5),
         # A.RandomGamma(p=0.5),
-        #
         A.OneOf([
+            A.CLAHE(p=0.5),
             A.ElasticTransform(p=1, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03),
             A.GridDistortion(p=1),
             A.OpticalDistortion(distort_limit=1, shift_limit=0.5, p=1),
@@ -81,8 +86,8 @@ def main():
         #     A.ChannelShuffle(p=1.0),
         # ], p=.5),
 
-        # A.Normalize(),
-        # ToTensorV2()
+        A.Normalize(),
+        ToTensorV2()
     ])
 
     val_tfms = A.Compose([
@@ -107,7 +112,7 @@ def main():
         val_cat = make_cat_df(val_annot, debug=True)
 
 
-        trn_ds = SegmentationDataset(data_dir=trn_annot, cat_df=trn_cat, mode='train', transform=trn_tfms)
+        trn_ds = SegmentationDataset(data_dir=trn_annot, cat_df=trn_cat, mode='train', transform=trn_tfms, augmix=augmix_data)
         weight_ds = SegmentationDataset(data_dir=trn_annot, cat_df=trn_cat, mode='valid', transform=val_tfms)
         val_ds = SegmentationDataset(data_dir=val_annot, cat_df=val_cat, mode='valid', transform=val_tfms)
 
@@ -186,8 +191,8 @@ def main():
         optimizer,
         first_cycle_steps=first_cycle_steps,
         cycle_mult=1.0,
-        max_lr=0.001,
-        min_lr=0.0001,
+        max_lr=0.0001,
+        min_lr=0.00001,
         warmup_steps=int(first_cycle_steps * 0.25),
         gamma=0.5
     )

@@ -190,10 +190,6 @@ class_labels ={
 
 def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, logger, device, beta=0.0, augmix_data=None, debug=True):
     cnt = 1
-    post_tfms = A.Compose([
-        A.Normalize(),
-        ToTensorV2()
-    ])
 
     model.train()
     trn_losses = []
@@ -205,31 +201,15 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
 
             optimizer.zero_grad()
             images, masks = sample['image'], sample['mask']
-            if augmix_data is not None:
-                images, masks = augmix_search(augmix_data.item(), images.numpy().astype(np.float32), masks.numpy())
-            else:
-                images, masks = images.numpy(), masks.numpy()
-
-            i, m = [], []
-            for img, mask in zip(images, masks):
-                post_tfmsed = post_tfms(image=img.astype(np.uint8),
-                                        mask=mask.astype(np.uint8))
-                img, mask = post_tfmsed['image'], post_tfmsed['mask']
-                i.append(img)
-                m.append(mask)
-
-            images = torch.stack(i)
-            masks = torch.stack(m)
             images, masks = images.to(device), masks.to(device).long()
 
-            if beta > 0:
-                lam = np.random.beta(beta, beta)
-                rand_index = torch.randperm(images.size()[0]).cuda()
-                for image_idx, rand_idx in enumerate(rand_index):
-                    bbx1, bby1, bbx2, bby2 = rand_bbox(images.size(), masks[rand_idx])
-                    images[image_idx, :, bbx1:bbx2, bby1:bby2] = images[rand_idx, :, bbx1:bbx2, bby1:bby2]
-                    masks[image_idx, bbx1:bbx2, bby1:bby2] = masks[rand_idx, bbx1:bbx2, bby1:bby2]
-
+            # if beta > 0:
+            #     lam = np.random.beta(beta, beta)
+            #     rand_index = torch.randperm(images.size()[0]).cuda()
+            #     for image_idx, rand_idx in enumerate(rand_index):
+            #         bbx1, bby1, bbx2, bby2 = rand_bbox(images.size(), masks[rand_idx])
+            #         images[image_idx, :, bbx1:bbx2, bby1:bby2] = images[rand_idx, :, bbx1:bbx2, bby1:bby2]
+            #         masks[image_idx, bbx1:bbx2, bby1:bby2] = masks[rand_idx, bbx1:bbx2, bby1:bby2]
 
             preds = model(images)
             if isinstance(preds, collections.OrderedDict):
@@ -246,8 +226,9 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
 
             if isinstance(preds, list):
                 loss = 0
+                ratio = [1, 0.4, 0.2]
                 for i in range(len(preds)):
-                    loss += criterion(preds[i], masks) * (1/2**i)
+                    loss += criterion(preds[i], masks) * ratio[i]
                 preds = preds[0]
             else:
                 loss = criterion(preds, masks)
@@ -260,6 +241,7 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
             preds = torch.argmax(preds, dim=1).detach().cpu().numpy()
             hist = add_hist(hist, masks.detach().cpu().numpy(), preds, n_class=12)
             trn_mIoU = label_accuracy_score(hist)[2]
+            trn_losses.append(loss.item())
 
             wandb.log({
                 'Learning rate': get_learning_rate(optimizer)[0],
@@ -267,7 +249,6 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
                 'Train mean IoU value': trn_mIoU * 100.0,
             })
 
-            trn_losses.append(loss.item())
             if (batch+1) % (int(len(trn_dl)//10)) == 0 or (batch+1) == len(trn_dl):
                 logger.info(f'Train Epoch {epoch+1} ==>  Batch [{str(batch+1).zfill(len(str(len(trn_dl))))}/{len(trn_dl)}]  |  Loss: {np.mean(trn_losses):.5f}  |  mIoU: {trn_mIoU:.5f}')
 
@@ -356,3 +337,248 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
             })
 
     return np.mean(trn_losses), trn_mIoU, np.mean(val_losses), val_mIoU
+
+
+
+def train(epoch, model, trn_dl, unlabel_dl, criterion, optimizer, scheduler, logger, device, augmix_data=None, threshold=True):
+    # post_tfms = A.Compose([
+    #     A.Normalize(),
+    #     ToTensorV2()
+    # ])
+
+    model.train()
+    trn_losses = []
+    hist = np.zeros((12, 12))
+    logger.info(f"\nTrain on Epoch {epoch+1}")
+    with tqdm(trn_dl, total=len(trn_dl), unit='batch') as trn_bar:
+        for batch, sample in enumerate(trn_bar):
+            trn_bar.set_description(f"Train Epoch {epoch+1}")
+
+            optimizer.zero_grad()
+            images, masks = sample['image'], sample['mask']
+            if augmix_data is not None:
+                images, masks = augmix_search(augmix_data.item(), images.numpy().astype(np.float32), masks.numpy())
+            else:
+                images, masks = images.numpy(), masks.numpy()
+
+            i, m = [], []
+            for img, mask in zip(images, masks):
+                post_tfmsed = post_tfms(image=img.astype(np.uint8),
+                                        mask=mask.astype(np.uint8))
+                img, mask = post_tfmsed['image'], post_tfmsed['mask']
+                i.append(img)
+                m.append(mask)
+
+            images = torch.stack(i)
+            masks = torch.stack(m)
+            images, masks = images.to(device), masks.to(device).long()
+
+            preds = model(images)
+            if isinstance(preds, collections.OrderedDict):
+                preds = preds['out']
+            elif isinstance(preds, list):
+                for i in range(len(preds)):
+                    pred = preds[i]
+                    ph, pw = pred.size(2), pred.size(3)
+                    h, w = masks.size(1), masks.size(2)
+                    if ph != h or pw != w:
+                        pred = F.interpolate(input=pred, size=(
+                            h, w), mode='bilinear', align_corners=True)
+                    preds[i] = pred
+
+            if isinstance(preds, list):
+                loss = 0
+                ratio = [1, 0.4, 0.2]
+                for i in range(len(preds)):
+                    loss += criterion(preds[i], masks) * ratio[i]
+                preds = preds[0]
+            else:
+                loss = criterion(preds, masks)
+
+            loss.backward()
+            optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
+
+            preds = torch.argmax(preds, dim=1).detach().cpu().numpy()
+            hist = add_hist(hist, masks.detach().cpu().numpy(), preds, n_class=12)
+            trn_mIoU = label_accuracy_score(hist)[2]
+            trn_losses.append(loss.item())
+
+            wandb.log({
+                'Learning rate': get_learning_rate(optimizer)[0],
+                'Train Loss value': np.mean(trn_losses),
+                'Train mean IoU value': trn_mIoU * 100.0,
+            })
+
+            if (batch+1) % (int(len(trn_dl)//10)) == 0 or (batch+1) == len(trn_dl):
+                logger.info(f'Train Epoch {epoch+1} ==>  Batch [{str(batch+1).zfill(len(str(len(trn_dl))))}/{len(trn_dl)}]  |  Loss: {np.mean(trn_losses):.5f}  |  mIoU: {trn_mIoU:.5f}')
+
+            trn_bar.set_postfix(trn_loss=np.mean(trn_losses),
+                                trn_mIoU=trn_mIoU)
+
+
+    unlabel_losses = []
+    hist = np.zeros((12, 12))
+    with tqdm(unlabel_dl, total=len(unlabel_dl), unit='batch') as unlabel_bar:
+        for batch, sample in enumerate(unlabel_bar):
+            unlabel_bar.set_description(f"Train Epoch {epoch+1}")
+
+            optimizer.zero_grad()
+            images = sample['image']
+            images = images.numpy()
+
+            i= []
+            for img, mask in zip(images, masks):
+                post_tfmsed = post_tfms(image=img.astype(np.uint8))
+                img= post_tfmsed['image']
+                i.append(img)
+
+            images = torch.stack(i)
+            images = images.to(device)
+            copy_img = images.clone()
+
+            model.eval()
+            pseudo_preds = model(images)
+            if isinstance(preds, collections.OrderedDict):
+                pseudo_preds = preds['out']
+            elif isinstance(preds, list):
+                pseudo_preds = pseudo_preds[0]
+
+            pseudo_label = torch.softmax(pseudo_preds, dim=1)
+            pseudo_label = torch.where((pseudo_label > threshold), pseudo_label, 0)
+            pseudo_label = torch.argmax(pseudo_label, dim=1)
+
+
+            model.train()
+            preds = model(copy_img)
+            if isinstance(preds, collections.OrderedDict):
+                preds = preds['out']
+            elif isinstance(preds, list):
+                for i in range(len(preds)):
+                    pred = preds[i]
+                    ph, pw = pred.size(2), pred.size(3)
+                    h, w = pseudo_label.size(1), pseudo_label.size(2)
+                    if ph != h or pw != w:
+                        pred = F.interpolate(input=pred, size=(
+                            h, w), mode='bilinear', align_corners=True)
+                    preds[i] = pred
+
+
+            if isinstance(preds, list):
+                loss = 0
+                ratio = [1, 0.4, 0.2]
+                for i in range(len(preds)):
+                    loss += criterion(preds[i], pseudo_label) * ratio[i]
+                preds = preds[0]
+            else:
+                loss = criterion(preds, masks)
+
+            loss.backward()
+            optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
+
+            preds = torch.argmax(preds, dim=1).detach().cpu().numpy()
+            hist = add_hist(hist, masks.detach().cpu().numpy(), preds, n_class=12)
+            unlabel_mIoU = label_accuracy_score(hist)[2]
+
+            wandb.log({
+                'Learning rate': get_learning_rate(optimizer)[0],
+                'Unlabeled Loss value': np.mean(unlabel_losses),
+                'Unlabeled mean IoU value': unlabel_mIoU * 100.0,
+            })
+
+            unlabel_losses.append(loss.item())
+            if (batch+1) % (int(len(unlabel_dl)//10)) == 0 or (batch+1) == len(unlabel_dl):
+                logger.info(f'Train Epoch {epoch+1} ==>  Batch [{str(batch+1).zfill(len(str(len(unlabel_dl))))}/{len(unlabel_dl)}]  |  Loss: {np.mean(unlabel_losses):.5f}  |  mIoU: {unlabel_mIoU:.5f}')
+
+            unlabel_bar.set_postfix(unlabel_loss=np.mean(unlabel_losses),
+                                    unlabel_mIoU=unlabel_mIoU)
+
+
+
+
+def valid(epoch, model, val_dl, criterion, optimizer, scheduler, logger, device, beta=0.0, debug=True):
+    cnt = 1
+    model.eval()
+    val_losses = []
+    hist = np.zeros((12, 12))
+    example_images = []
+
+    logger.info(f"\nValid on Epoch {epoch+1}")
+    with torch.no_grad():
+        with tqdm(val_dl, total=len(val_dl), unit='batch') as val_bar:
+            for batch, sample in enumerate(val_bar):
+                val_bar.set_description(f"Valid Epoch {epoch+1}")
+
+                images, masks = sample['image'], sample['mask']
+                images, masks = images.to(device), masks.to(device).long()
+
+                preds = model(images)
+                if isinstance(preds, collections.OrderedDict):
+                    preds = preds['out']
+                elif isinstance(preds, list):
+                    _, preds = preds
+                    ph, pw = preds.size(2), preds.size(3)
+                    h, w = masks.size(1), masks.size(2)
+                    if ph != h or pw != w:
+                        preds = F.interpolate(input=preds, size=(
+                            h, w), mode='bilinear', align_corners=True)
+
+                loss = criterion(preds, masks)
+                val_losses.append(loss.item())
+
+                if debug:
+                    debug_path = os.path.join('.', 'debug', 'valid')
+                    if not os.path.exists(debug_path):
+                        os.makedirs(debug_path)
+
+                    file_names = sample['info']
+                    pred_masks = torch.argmax(preds.squeeze(), dim=1).detach().cpu().numpy()
+                    for idx, file_name in enumerate(file_names):
+                        pred_mask = pred_masks[idx]
+                        ori_image = cv2.imread(os.path.join('.', 'input', 'data', file_name))
+                        ori_image = ori_image.astype(np.float32)
+
+                        for i in range(1, 12):
+                            a_mask = (pred_mask == i)
+                            cls_mask = np.zeros(ori_image.shape).astype(np.float32)
+                            cls_mask[a_mask] = cls_colors[i]
+                            ori_image[a_mask] = cv2.addWeighted(ori_image[a_mask], 0.2, cls_mask[a_mask], 0.8, gamma=0.0)
+
+                        cv2.imwrite(os.path.join(debug_path, f"{cnt}.jpg"), ori_image)
+                        cnt += 1
+
+                input_np = cv2.imread(os.path.join('.', 'input', 'data', file_names[0]))
+                example_images.append(wandb.Image(input_np, masks={
+                    "predictions": {
+                        "mask_data": preds.argmax(1)[0].detach().cpu().numpy(),
+                        "class_labels": class_labels
+                    },
+                    "ground-truth": {
+                        "mask_data": masks[0].detach().cpu().numpy(),
+                        "class_labels": class_labels
+                    }
+                }))
+
+                preds = torch.argmax(preds, dim=1).detach().cpu().numpy()
+                hist = add_hist(hist, masks.detach().cpu().numpy(), preds, n_class=12)
+                val_mIoU = label_accuracy_score(hist)[2]
+
+
+
+                if (batch + 1) % (int(len(val_dl) // 10)) == 0 or (batch+1) == len(val_dl):
+                    logger.info(
+                        f'Valid Epoch {epoch+1} ==>  Batch [{str(batch+1).zfill(len(str(len(val_dl))))}/{len(val_dl)}]  |  Loss: {np.mean(val_losses):.5f}  |  mIoU: {val_mIoU:.5f}')
+
+                val_bar.set_postfix(val_loss=np.mean(val_losses),
+                                    val_mIoU=val_mIoU)
+
+            wandb.log({
+                'Example Image': example_images,
+                'Valid Loss value': np.mean(val_losses),
+                'Valid mean IoU value': val_mIoU * 100.0,
+            })
+
+    return np.mean(val_losses), val_mIoU

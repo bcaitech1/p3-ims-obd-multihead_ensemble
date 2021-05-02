@@ -62,7 +62,7 @@ def train(cfg, train_loader, val_loader):
         0.8821,
         0.9995,
         0.9947
-    ]
+    ]    
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -180,23 +180,19 @@ def train(cfg, train_loader, val_loader):
             
             example_images = []
 
-            for i, (images, masks, one_hot_label, _) in enumerate(tqdm(val_loader, desc=f'Validation')):
+            for i, (images, masks, _, _) in enumerate(tqdm(val_loader, desc=f'Validation')):
                 
                 images = torch.stack(images)
                 masks = torch.stack(masks).long()  
-                one_hot_label = torch.stack(one_hot_label).float()
 
                 images, masks = images.to(device), masks.to(device)
-                one_hot_label = one_hot_label.to(device)
 
                 logits, aux_logits = model(images)
-
-                aux_loss = auxilary_criterion(aux_logits, one_hot_label)
 
                 loss_1 = criterion(logits, masks)
                 loss_2 = criterion_2(logits, masks)
 
-                loss = loss_1 * LAMBDA + loss_2 * (1 - LAMBDA) + aux_loss * AUX_WEIGHT
+                loss = loss_1 * LAMBDA + loss_2 * (1 - LAMBDA)
 
                 acc = pixel_accuracy(logits, masks)
                 m_iou = mIoU(logits, masks)                 

@@ -1,6 +1,7 @@
 import os
 import cv2
 import numpy as np
+import random
 from pycocotools.coco import COCO
 
 import torch
@@ -19,10 +20,12 @@ def get_classname(classID, cats):
 
 class RecycleTrashDataset(Dataset):
     """Some Information about RecycleTrashDataset"""
-    def __init__(self, data_dir, mode='train', transform=None):
+    def __init__(self, data_dir, mode='train', transform=None, augmix=None, augmix_prob=0):
         super().__init__()
         self.mode = mode
         self.transform = transform
+        self.augmix = augmix
+        self.augmix_prob = augmix_prob
         self.coco = COCO(os.path.join(dataset_path, data_dir))
         
     def __getitem__(self, index: int):
@@ -57,6 +60,12 @@ class RecycleTrashDataset(Dataset):
             target = np.unique(masks).astype(int)
             one_hot_label = np.sum(np.eye(12)[target], axis=0)
 
+            # img, mask 다 np , 512x512
+            if self.augmix is not None :
+              r = np.random.rand(1)
+              if r < self.augmix_prob :
+                  images , masks = self.augmix_search(images , masks)
+
             # transform -> albumentations 라이브러리 활용
             if self.transform is not None:
                 transformed = self.transform(image=images, mask=masks)
@@ -77,3 +86,23 @@ class RecycleTrashDataset(Dataset):
     def __len__(self) -> int:
         # 전체 dataset의 size를 return
         return len(self.coco.getImgIds())
+
+
+    def augmix_search(self, images, masks):
+        # image 3, 512, 512 ,mask: 512, 512 (둘 다 numpy)
+        temp_dict = {
+        0: 4, 1: 5, 2: 6, 3: 10, 4: 11
+        }
+        num = [ 4, 5, 6, 10, 11]
+        
+        label = random.choice(num)  # ex) 4
+        idx = np.random.randint(len(self.augmix[label]))
+        augmix_img = self.augmix[label][idx]
+        
+        augmix_mask = np.zeros((512, 512))
+        augmix_mask[augmix_img[:, :, 0] != 0] = label     # augmix img가 있는 만큼 label로 mask를 채워줌
+        
+        images[augmix_img != 0] = augmix_img[augmix_img != 0]
+        masks[augmix_mask!= 0] = augmix_mask[augmix_mask != 0]
+        
+        return images, masks

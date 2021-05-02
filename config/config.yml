@@ -15,6 +15,9 @@ base:
     log_intervals: 10         
   val_args:    
     val_batch_size: 16
+  augmix_args:
+    use_augmix: False
+    augmix_prob: 0
 
 DeepLabV3Plus:
   seed: 77
@@ -33,6 +36,9 @@ DeepLabV3Plus:
     log_intervals: 10         
   val_args:    
     val_batch_size: 16
+  augmix_args:
+    use_augmix: False
+    augmix_prob: 0
 
 DeepLabV3Plus-b3:
   seed: 77
@@ -51,6 +57,9 @@ DeepLabV3Plus-b3:
     log_intervals: 10         
   val_args:    
     val_batch_size: 10
+  augmix_args:
+    use_augmix: False
+    augmix_prob: 0
 
 
 Light:
@@ -70,6 +79,9 @@ Light:
     log_intervals: 10
   val_args:    
     val_batch_size: 64
+  augmix_args:
+    use_augmix: False
+    augmix_prob: 0
 
 
 UNetPlusPlus:
@@ -89,6 +101,9 @@ UNetPlusPlus:
     log_intervals: 10
   val_args:    
     val_batch_size: 10
+  augmix_args:
+    use_augmix: False
+    augmix_prob: 0
 
 
 DeepLabV3Plus-aux:
@@ -108,3 +123,28 @@ DeepLabV3Plus-aux:
     log_intervals: 10
   val_args:    
     val_batch_size: 10
+  augmix_args:
+    use_augmix: False
+    augmix_prob: 0
+
+
+PANet-aux:
+  seed: 77
+  backbone: 'timm-efficientnet-b3'
+  backbone_weight: 'imagenet'
+  model_arc: 'PAN'
+  num_classes: 12
+  image_size: 512
+  output_dir: './results/'
+  train_args:
+    num_epochs: 50
+    train_batch_size: 10
+    max_lr: 0.0001
+    min_lr: 0.00001
+    weight_decay: 0.0
+    log_intervals: 10
+  val_args:    
+    val_batch_size: 10
+  augmix_args:
+    use_augmix: True
+    augmix_prob: 0.5

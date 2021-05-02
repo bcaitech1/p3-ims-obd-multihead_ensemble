@@ -52,10 +52,18 @@ def test(cfg, crf):
 
     model_module = getattr(import_module('segmentation_models_pytorch'), MODEL_ARC)
 
+    aux_params=dict(
+        pooling='avg',
+        dropout=0.5,
+        activation=None,
+        classes=12
+    )
+
     model = model_module(
         encoder_name=BACKBONE,
         in_channels=3,
-        classes=NUM_CLASSES
+        classes=NUM_CLASSES,
+        aux_params=aux_params
     )
 
     model = model.to(device)
@@ -70,7 +78,7 @@ def test(cfg, crf):
         for step, (imgs, image_infos) in enumerate(tqdm(test_loader, desc='Test : ')):
 
             # inference (512 x 512)
-            outs = model(torch.stack(imgs).to(device))
+            outs, _ = model(torch.stack(imgs).to(device))
             probs = F.softmax(outs, dim=1).data.cpu().numpy()
             
             if crf:                

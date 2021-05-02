@@ -111,8 +111,8 @@ def collate_fn(batch):
     return tuple(zip(*batch))
 
 
-def get_dataloader(data_dir='train.json', mode='train', transform=None, batch_size=16, shuffle=True, collate_fn=collate_fn):
-    dataset = RecycleTrashDataset(data_dir=data_dir, mode=mode, transform=transform)
+def get_dataloader(data_dir='train.json', mode='train', transform=None, batch_size=16, shuffle=True, augmix=None, augmix_prob=0, collate_fn=collate_fn):
+    dataset = RecycleTrashDataset(data_dir=data_dir, mode=mode, transform=transform, augmix=augmix, augmix_prob=augmix_prob)
 
     loader = DataLoader(
         dataset,
@@ -201,12 +201,12 @@ def dense_crf_wrapper(args):
     return dense_crf(args[0], args[1])
 
 def dense_crf(img, output_probs):
-    MAX_ITER = 10
+    MAX_ITER = 50
     POS_W = 3
-    POS_XY_STD = 1
+    POS_XY_STD = 3
     Bi_W = 4
-    Bi_XY_STD = 67
-    Bi_RGB_STD = 3
+    Bi_XY_STD = 49
+    Bi_RGB_STD = 5
 
     c = output_probs.shape[0]
     h = output_probs.shape[1]

@@ -113,32 +113,32 @@ class SegmentationDataset(Dataset):
 
 
 if __name__ == "__main__":
-    from utils import make_cat_df
-    import matplotlib.pyplot as plt
-    from albumentations.pytorch import ToTensorV2
+  from src.utils import make_cat_df
+  import matplotlib.pyplot as plt
+  from albumentations.pytorch import ToTensorV2
+  import numpy as np
 
-    np_load_old = np.load
-    np.load = lambda *a, **k: np_load_old(*a, allow_pickle=True, **k)
-    augmix_data = np.load('/content/drive/MyDrive/code/augmix.npy')
+  # 본인에 맞게 경로 설정
+  np_load_old = np.load
+  np.load = lambda *a, **k: np_load_old(*a, allow_pickle=True, **k)
+  augmix_data = np.load('/content/drive/MyDrive/code/augmix.npy')
 
-    data_path = '/content/input'
-    train_annot_path = os.path.join(data_path, "train.json")
-    cat_df = make_cat_df(train_annot_path, debug=True)
-    tfms = ToTensorV2()
-    ds = SegmentationDataset(train_annot_path, cat_df, mode='train', transform=tfms, use_augmix = augmix_data)
+  data_path = '/content/input'
+  train_annot_path = os.path.join(data_path, "train.json")
+  cat_df = make_cat_df(train_annot_path, debug=True)
+  tfms = ToTensorV2()
+  ds = SegmentationDataset(train_annot_path, cat_df, mode='train', transform=tfms, augmix = augmix_data.item() , prob = 1)
 
-    num_cls = 12
-    cmap = plt.get_cmap("rainbow")
-    colors = [cmap(i) for i in np.linspace(0, 1, num_cls+2)]
-    colors = [(c[2] * 255, c[1] * 255, c[0] * 255) for c in colors]
-    cls_colors = {k: colors[k] for k in range(num_cls+1)}
+  num_cls = 12
+  cmap = plt.get_cmap("rainbow")
+  colors = [cmap(i) for i in np.linspace(0, 1, num_cls+2)]
+  colors = [(c[2] * 255, c[1] * 255, c[0] * 255) for c in colors]
+  cls_colors = {k: colors[k] for k in range(num_cls+1)}
 
-    for idx, sample in enumerate(iter(ds)):
-        if idx == 1: break
-
-        image = sample['image']
-        image = image.permute(1, 2, 0).detach().cpu().numpy()
-        mask = sample['mask']
-
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        cv2.imshow("image", image.astype(np.uint8))
+  for idx, sample in enumerate(iter(ds)):
+    image = sample['image']
+    image = image.permute(1, 2, 0).detach().cpu().numpy()
+    mask = sample['mask']
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    plt.imshow(image.astype(np.uint8))
+    break

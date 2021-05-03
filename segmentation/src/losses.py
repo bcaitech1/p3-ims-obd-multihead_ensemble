@@ -97,6 +97,61 @@ class FocalLoss(nn.Module):
         return loss.mean()
 
 
+class FocalCELoss(nn.Module):
+    def __init__(self, gamma=2, alpha=.25, eps=1e-7, weight=None):
+        super(FocalCELoss, self).__init__()
+        self.gamma = gamma
+        self.alpha = alpha
+        self.eps = eps
+        self.weight = weight
+
+    def forward(self, inp, tar):
+        logp = F.log_softmax(inp, dim=1)
+        ce_loss = F.nll_loss(logp, tar, weight=self.weight, reduction='none')
+        pt = torch.exp(-ce_loss)
+
+        fc_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        fc_loss = fc_loss.mean()
+
+        ce = F.cross_entropy(inp, tar, reduction='mean', weight=self.weight)
+        fc_ce = ce * 0.7 + fc_loss * 0.3
+        return fc_ce
+
+
+class AmazingCELoss(nn.Module):
+    def __init__(self, gamma=2, alpha=.25, eps=1e-7, weight=None):
+        super(AmazingCELoss, self).__init__()
+        self.gamma = gamma
+        self.alpha = alpha
+        self.eps = eps
+        self.weight = weight
+
+    def forward(self, inp, tar, smooth=1.0):
+        num_classes = inp.size(1)
+        true_1_hot = torch.eye(num_classes)[tar]
+
+        true_1_hot = true_1_hot.permute(0, 3, 1, 2).float()
+        probas = F.softmax(inp, dim=1)
+
+        true_1_hot = true_1_hot.type(inp.type())
+        dims = (0,) + tuple(range(2, tar.ndimension()))
+        intersection = torch.sum(probas * true_1_hot, dims)
+        cardinality = torch.sum(probas + true_1_hot, dims)
+        dice_loss = ((2. * intersection + smooth) / (cardinality + smooth)).mean()
+        dice_loss = (1 - dice_loss)
+
+        logp = F.log_softmax(inp, dim=1)
+        ce_loss = F.nll_loss(logp, tar, weight=self.weight, reduction='none')
+        pt = torch.exp(-ce_loss)
+
+        fc_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        fc_loss = fc_loss.mean()
+
+        ce_loss = F.cross_entropy(inp, tar, reduction='mean', weight=self.weight)
+        amazing_loss = ce_loss * 0.5 + dice_loss * 0.3 + fc_loss * 0.2
+        return amazing_loss
+
+
 class TverskyLoss(nn.Module):
     def __init__(self, alpha=0.5, beta=0.5, weight=None, size_average=True):
         super(TverskyLoss, self).__init__()

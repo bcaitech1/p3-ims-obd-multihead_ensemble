@@ -49,7 +49,7 @@ def main():
     # define key paths
     main_path = '.'
     data_path = os.path.join(main_path, 'input', 'data')
-    augmix_path = os.path.join(main_path, 'input', 'aug.npy')
+    augmix_path = os.path.join(main_path, 'input', 'augmix_all.npy')
     if args.use_augmix:
         print("Use SeoungBaeMix\n")
         np_load_old = np.load
@@ -65,7 +65,7 @@ def main():
     # define transform
     trn_tfms = A.Compose([
         A.HorizontalFlip(p=0.5),
-        A.VerticalFlip(p=0.5),
+        A.VerticalFlip(p=0.3),
         A.OneOf([
             A.RandomRotate90(p=0.5),
             A.Rotate(limit=30, p=0.5),
@@ -73,8 +73,9 @@ def main():
 
         # A.RandomBrightnessContrast(p=0.5),
         # A.RandomGamma(p=0.5),
+        A.RandomBrightness(p=0.5),
         A.OneOf([
-            A.CLAHE(p=0.5),
+            A.CLAHE(p=1.0),
             A.ElasticTransform(p=1, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03),
             A.GridDistortion(p=1),
             A.OpticalDistortion(distort_limit=1, shift_limit=0.5, p=1),
@@ -215,7 +216,8 @@ def main():
         print(normedWeights, "\n")
 
     # criterion = nn.CrossEntropyLoss()
-    criterion = DiceCELoss(weight=normedWeights)
+    # criterion = DiceCELoss(weight=normedWeights)
+    criterion = AmazingCELoss(weight=normedWeights)
     # criterion = IoULoss()
     # criterion = FocalLoss()
 

@@ -2,6 +2,28 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+# from torchgeometry.losses import SSIM
+# import numpy as np
+
+pos_weight = [
+    0.3040,
+    0.9994,
+    0.9778,
+    0.9097,
+    0.9930,
+    0.9911,
+    0.9924,
+    0.9713,
+    0.9851,
+    0.8821,
+    0.9995,
+    0.9947
+]    
+
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+pos_weight = torch.tensor(pos_weight).float().to(device)
+
 
 """
     https://www.kaggle.com/bigironsphere/loss-function-library-keras-pytorch
@@ -25,7 +47,7 @@ from torch.autograd import Variable
   - FocalLoss 
 """
 class FocalLoss(nn.Module):
-    def __init__(self, gamma=2, alpha=.25, eps=1e-7, weights=None):
+    def __init__(self, gamma=2, alpha=.25, eps=1e-7, weights=None):   #weight = pos_weight 주면 됨 
         super(FocalLoss, self).__init__()
         self.gamma = gamma
         self.alpha = alpha
@@ -129,7 +151,7 @@ class IoULoss(nn.Module):
 
 
 class TverskyLoss(nn.Module):
-    def __init__(self, alpha=0.5, beta=0.5):
+    def __init__(self, alpha=0.5, beta=0.5):    # 0.5면 dice와 동일 
         super(TverskyLoss, self).__init__()
         self.alpha = alpha
         self.beta = beta
@@ -162,11 +184,12 @@ class TverskyLoss(nn.Module):
 
 
 class FocalTverskyLoss(nn.Module):
-    def __init__(self, alpha=0.5, beta=0.5, gamma=1):
+    def __init__(self, alpha = .25 , beta=0.6, gamma=2):
         super(FocalTverskyLoss, self).__init__()
         self.alpha = alpha
         self.beta = beta
         self.gamma = gamma
+
 
     def forward(self, inputs, targets, smooth=1):
         """Computes the FocalTverskyLoss
@@ -192,8 +215,8 @@ class FocalTverskyLoss(nn.Module):
         FP = torch.sum((1 - true_1_hot) * probas, dims)
         FN = torch.sum(true_1_hot * (1 - inputs) , dims)
 
-        Tversky = (TP + smooth) / (TP + self.alpha * FP + self.beta * FN + smooth).mean()
-        FocalTversky = ((1 - Tversky) ** self.gamma).mean()
+        Tversky = (TP + smooth) / (TP + self.beta * FP +(1-self.beta) * FN + smooth).mean()
+        FocalTversky = (self.alpha * (1 - Tversky) ** self.gamma).mean()
 
         return FocalTversky
 
@@ -274,14 +297,14 @@ class LogCoshDiceLoss(nn.Module):
 ################################################################################
 
 class DiceCELoss(nn.Module):
-    def __init__(self, weight=None, size_average=True , alpha = 0.75):
+    def __init__(self, weight=pos_weight, alpha = 0.75):
         super(DiceCELoss, self).__init__()
         self.alpha = alpha
         self.dice = DiceLoss()
         self.weight = weight
 
     def forward(self, inputs, targets, eps = 1e-8):
-         """Computes the DiceCELoss
+        """Computes the DiceCELoss
         Notes: [Batch size,Num classes,Height,Width]
         Args:
             targets: a tensor of shape [B, H, W] or [B, 1, H, W].
@@ -298,14 +321,14 @@ class DiceCELoss(nn.Module):
 
 
 class DiceFocalLoss(nn.Module):
-    def __init__(self, alpha = 0.8):
+    def __init__(self, alpha = 0.75):
         super(DiceFocalLoss, self).__init__()
         self.alpha = alpha
         self.dice = DiceLoss()
         self.focal = FocalLoss()
 
     def forward(self, inputs, targets, eps = 1e-8):
-         """Computes the DiceFocalLoss
+        """Computes the DiceFocalLoss
         Notes: [Batch size,Num classes,Height,Width]
         Args:
             targets: a tensor of shape [B, H, W] or [B, 1, H, W].
@@ -319,6 +342,27 @@ class DiceFocalLoss(nn.Module):
         focal_loss = self.focal(inputs , targets)
         dice_focal_loss = focal_loss * self.alpha + dice_loss * (1-self.alpha)
         return dice_focal_loss
+
+
+# class TripleLoss(nn.Module):
+#     def __init__(self,alpha = 0.75, beta = 0.25 , gamma = 0.25):
+#         super(TripleLoss, self).__init__()
+#         self.alpha = alpha
+#         self.beta = beta
+#         self.gamma = gamma       
+#         self.dice = DiceLoss()
+#         self.focal = FocalLoss()
+#         self.ssim = SSIM(window_size = 11)
+
+#     def forward(self, inputs, targets):
+#         dice_loss = self.dice(inputs , targets)
+#         focal_loss = self.focal(inputs , targets)
+#         targets = targets.type(inputs.type()) 
+#         ss_input = F.softmax(inputs, dim=1).data.cpu()
+#         ss_input = torch.argmax(ss_input, axis=1)              # [B,1,H,W] 
+#         ssim_loss = self.ssim(ss_input, targets)
+#         triple_loss = self.alpha * focal_loss + self.beta * dice_loss + self.gamma * ssim_loss
+#         return triple_loss  
 
 #######################################################################################
 
@@ -380,10 +424,7 @@ _criterion_entrypoints = {
     'LovaszSoftmax' : LovaszSoftmax,
     'DiceCELoss' : DiceCELoss,
     'DiceFocalLoss' : DiceFocalLoss,
-    'ComboLoss':ComboLoss,
-    'ComboLoss' : ComboLoss,
-    'TripleLoss' : TripleLoss,
-    'DoubleLoss' : DoubleLoss
+#     'TripleLoss' : TripleLoss,
 }
 
 def criterion_entrypoint(criterion_name):
@@ -400,4 +441,3 @@ def create_criterion(criterion_name, **kwargs):
     else:
         raise RuntimeError('Unknown loss (%s)' % criterion_name)
     return criterion
-

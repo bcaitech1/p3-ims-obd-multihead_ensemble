@@ -421,13 +421,15 @@ blocks_dict = {
 
 class HighResolutionNet(nn.Module):
 
-    def __init__(self, config, **kwargs):
+    def __init__(self, config, test=False, **kwargs):
         global ALIGN_CORNERS
         extra = config['MODEL']['EXTRA']
         super(HighResolutionNet, self).__init__()
         ALIGN_CORNERS = config['MODEL']['ALIGN_CORNERS']
 
         # stem net
+        self.test = test
+        print(self.test)
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1,
                                bias=False)
         self.bn1 = BatchNorm2d(64, momentum=BN_MOMENTUM)
@@ -653,10 +655,13 @@ class HighResolutionNet(nn.Module):
 
         out = self.cls_head(feats)
 
-        out_aux_seg.append(out)
-        out_aux_seg.append(out_aux)
 
-        return out_aux_seg
+        if not self.test:
+            out_aux_seg.append(out)
+            out_aux_seg.append(out_aux)
+            return out_aux_seg
+        else:
+            return out
 
     def init_weights(self, pretrained='', ):
         logger.info('=> init weights from normal distribution')
@@ -689,8 +694,8 @@ class HighResolutionNet(nn.Module):
             raise RuntimeError('No such file {}'.format(pretrained))
 
 
-def get_seg_model(cfg, **kwargs):
-    model = HighResolutionNet(cfg, **kwargs)
+def get_seg_model(cfg, test=False, **kwargs):
+    model = HighResolutionNet(cfg, test=test, **kwargs)
     model.init_weights(cfg['MODEL']['PRETRAINED'])
 
     return model

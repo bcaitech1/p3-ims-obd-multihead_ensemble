@@ -114,7 +114,7 @@ class FocalCELoss(nn.Module):
         fc_loss = fc_loss.mean()
 
         ce = F.cross_entropy(inp, tar, reduction='mean', weight=self.weight)
-        fc_ce = ce * 0.7 + fc_loss * 0.3
+        fc_ce = ce * 0.8 + fc_loss * 0.2
         return fc_ce
 
 

@@ -21,7 +21,21 @@ num_cls = 12
 cmap = plt.get_cmap("rainbow")
 colors = [cmap(i) for i in np.linspace(0, 1, num_cls+2)]
 colors = [(c[2] * 255, c[1] * 255, c[0] * 255) for c in colors]
-cls_colors = {k: colors[k] for k in range(num_cls+1)}
+# cls_colors = {k: colors[k] for k in range(num_cls+1)}
+cls_colors = {
+    0: (255.0, 0.0, 127.5),
+    1 : (255, 29, 29),
+    2 : (236, 127, 43),
+    3 : (241, 229 , 15),
+    4 : (124, 241, 15),
+    5 : (31,62,48),
+    6 : (52,226,220),
+    7 : (20,96,247),
+    8 : (8,19,62),
+    9 : (213, 192, 231),
+    10 : (75,0,135),
+    11 : (255,0,187)
+  }
 
 
 def seed_everything(seed=42):
@@ -340,15 +354,67 @@ def train_valid(epoch, model, trn_dl, val_dl, criterion, optimizer, scheduler, l
 
 
 
-def train(epoch, model, trn_dl, unlabel_dl, criterion, optimizer, scheduler, logger, device, augmix_data=None, threshold=True):
-    # post_tfms = A.Compose([
-    #     A.Normalize(),
-    #     ToTensorV2()
-    # ])
-
+def train(epoch, model, trn_dl, pseudo_dl, criterion, optimizer, scheduler, logger, device, augmix_data=None):
     model.train()
     trn_losses = []
     hist = np.zeros((12, 12))
+    logger.info(f"\nPseudo Train on Epoch {epoch+1}")
+
+
+    with tqdm(pseudo_dl, total=len(pseudo_dl), unit='batch') as pseudo_bar:
+        for batch, sample in enumerate(pseudo_bar):
+            pseudo_bar.set_description(f"Train Epoch {epoch+1}")
+
+            optimizer.zero_grad()
+            images, masks = sample['image'], sample['mask']
+            images, masks = images.to(device), masks.to(device).long()
+
+            preds = model(images)
+            if isinstance(preds, collections.OrderedDict):
+                preds = preds['out']
+            elif isinstance(preds, list):
+                for i in range(len(preds)):
+                    pred = preds[i]
+                    ph, pw = pred.size(2), pred.size(3)
+                    h, w = masks.size(1), masks.size(2)
+                    if ph != h or pw != w:
+                        pred = F.interpolate(input=pred, size=(
+                            h, w), mode='bilinear', align_corners=True)
+                    preds[i] = pred
+
+            if isinstance(preds, list):
+                loss = 0
+                ratio = [1, 0.4, 0.2]
+                for i in range(len(preds)):
+                    loss += criterion(preds[i], masks) * ratio[i]
+                preds = preds[0]
+            else:
+                loss = criterion(preds, masks)
+
+            loss.backward()
+            optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
+
+            preds = torch.argmax(preds, dim=1).detach().cpu().numpy()
+            hist = add_hist(hist, masks.detach().cpu().numpy(), preds, n_class=12)
+            pseudo_mIoU = label_accuracy_score(hist)[2]
+            trn_losses.append(loss.item())
+
+            wandb.log({
+                'Learning rate': get_learning_rate(optimizer)[0],
+                'Pseudo Loss value': np.mean(trn_losses),
+                'Pseudo mean IoU value': pseudo_mIoU * 100.0,
+            })
+
+            if (batch+1) % (int(len(pseudo_dl)//10)) == 0 or (batch+1) == len(pseudo_dl):
+                logger.info(f'Train Epoch {epoch+1} ==>  Batch [{str(batch+1).zfill(len(str(len(pseudo_dl))))}/{len(pseudo_dl)}]  |  Loss: {np.mean(trn_losses):.5f}  |  mIoU: {pseudo_mIoU:.5f}')
+
+            pseudo_bar.set_postfix(pseudo_loss=np.mean(trn_losses),
+                                   pseudo_mIoU=pseudo_mIoU)
+
+
+    model.train()
     logger.info(f"\nTrain on Epoch {epoch+1}")
     with tqdm(trn_dl, total=len(trn_dl), unit='batch') as trn_bar:
         for batch, sample in enumerate(trn_bar):
@@ -356,21 +422,6 @@ def train(epoch, model, trn_dl, unlabel_dl, criterion, optimizer, scheduler, log
 
             optimizer.zero_grad()
             images, masks = sample['image'], sample['mask']
-            if augmix_data is not None:
-                images, masks = augmix_search(augmix_data.item(), images.numpy().astype(np.float32), masks.numpy())
-            else:
-                images, masks = images.numpy(), masks.numpy()
-
-            i, m = [], []
-            for img, mask in zip(images, masks):
-                post_tfmsed = post_tfms(image=img.astype(np.uint8),
-                                        mask=mask.astype(np.uint8))
-                img, mask = post_tfmsed['image'], post_tfmsed['mask']
-                i.append(img)
-                m.append(mask)
-
-            images = torch.stack(i)
-            masks = torch.stack(m)
             images, masks = images.to(device), masks.to(device).long()
 
             preds = model(images)
@@ -418,88 +469,7 @@ def train(epoch, model, trn_dl, unlabel_dl, criterion, optimizer, scheduler, log
                                 trn_mIoU=trn_mIoU)
 
 
-    unlabel_losses = []
-    hist = np.zeros((12, 12))
-    with tqdm(unlabel_dl, total=len(unlabel_dl), unit='batch') as unlabel_bar:
-        for batch, sample in enumerate(unlabel_bar):
-            unlabel_bar.set_description(f"Train Epoch {epoch+1}")
-
-            optimizer.zero_grad()
-            images = sample['image']
-            images = images.numpy()
-
-            i= []
-            for img, mask in zip(images, masks):
-                post_tfmsed = post_tfms(image=img.astype(np.uint8))
-                img= post_tfmsed['image']
-                i.append(img)
-
-            images = torch.stack(i)
-            images = images.to(device)
-            copy_img = images.clone()
-
-            model.eval()
-            pseudo_preds = model(images)
-            if isinstance(preds, collections.OrderedDict):
-                pseudo_preds = preds['out']
-            elif isinstance(preds, list):
-                pseudo_preds = pseudo_preds[0]
-
-            pseudo_label = torch.softmax(pseudo_preds, dim=1)
-            pseudo_label = torch.where((pseudo_label > threshold), pseudo_label, 0)
-            pseudo_label = torch.argmax(pseudo_label, dim=1)
-
-
-            model.train()
-            preds = model(copy_img)
-            if isinstance(preds, collections.OrderedDict):
-                preds = preds['out']
-            elif isinstance(preds, list):
-                for i in range(len(preds)):
-                    pred = preds[i]
-                    ph, pw = pred.size(2), pred.size(3)
-                    h, w = pseudo_label.size(1), pseudo_label.size(2)
-                    if ph != h or pw != w:
-                        pred = F.interpolate(input=pred, size=(
-                            h, w), mode='bilinear', align_corners=True)
-                    preds[i] = pred
-
-
-            if isinstance(preds, list):
-                loss = 0
-                ratio = [1, 0.4, 0.2]
-                for i in range(len(preds)):
-                    loss += criterion(preds[i], pseudo_label) * ratio[i]
-                preds = preds[0]
-            else:
-                loss = criterion(preds, masks)
-
-            loss.backward()
-            optimizer.step()
-            if scheduler is not None:
-                scheduler.step()
-
-            preds = torch.argmax(preds, dim=1).detach().cpu().numpy()
-            hist = add_hist(hist, masks.detach().cpu().numpy(), preds, n_class=12)
-            unlabel_mIoU = label_accuracy_score(hist)[2]
-
-            wandb.log({
-                'Learning rate': get_learning_rate(optimizer)[0],
-                'Unlabeled Loss value': np.mean(unlabel_losses),
-                'Unlabeled mean IoU value': unlabel_mIoU * 100.0,
-            })
-
-            unlabel_losses.append(loss.item())
-            if (batch+1) % (int(len(unlabel_dl)//10)) == 0 or (batch+1) == len(unlabel_dl):
-                logger.info(f'Train Epoch {epoch+1} ==>  Batch [{str(batch+1).zfill(len(str(len(unlabel_dl))))}/{len(unlabel_dl)}]  |  Loss: {np.mean(unlabel_losses):.5f}  |  mIoU: {unlabel_mIoU:.5f}')
-
-            unlabel_bar.set_postfix(unlabel_loss=np.mean(unlabel_losses),
-                                    unlabel_mIoU=unlabel_mIoU)
-
-
-
-
-def valid(epoch, model, val_dl, criterion, optimizer, scheduler, logger, device, beta=0.0, debug=True):
+def valid(epoch, model, val_dl, criterion, logger, device, debug=True):
     cnt = 1
     model.eval()
     val_losses = []

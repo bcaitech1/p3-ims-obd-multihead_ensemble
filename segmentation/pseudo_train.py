@@ -12,9 +12,9 @@ import segmentation_models_pytorch as smp
 
 from src.utils import seed_everything
 from src.utils import make_cat_df
-from src.utils import train_valid
+from src.utils import train, valid
 from src.utils import save_model
-from src.dataset import SegmentationDataset
+from src.dataset import SegmentationDataset, PseudoDataset
 from src.models.fcn8s import FCN8s
 from src.losses import *
 from src.schedulers import CosineAnnealingWarmupRestarts
@@ -112,11 +112,19 @@ def main():
         val_ds = SegmentationDataset(data_dir=val_annot, cat_df=val_cat, mode='valid', transform=val_tfms)
 
 
+    pseudo_ds = PseudoDataset(data_dir='input', pseudo_csv='pseudo_result2.csv', transform=val_tfms)
+
     # define dataloader
     trn_dl = DataLoader(dataset=trn_ds,
                         batch_size=args.batch_size,
                         shuffle=True,
                         num_workers=4)
+
+    pseudo_dl = DataLoader(dataset=pseudo_ds,
+                           batch_size=args.batch_size,
+                           shuffle=True,
+                           num_workers=4
+    )
 
     weight_dl = DataLoader(dataset=weight_ds,
                         batch_size=args.batch_size,
@@ -181,13 +189,13 @@ def main():
     wandb.watch(model)
 
     optimizer = optim.AdamW(params=model.parameters(), lr=args.lr, weight_decay=args.decay)
-    first_cycle_steps = len(trn_dl) * args.epochs // 3
+    first_cycle_steps = (len(trn_dl) + len(pseudo_dl)) * args.epochs // 3
     scheduler = CosineAnnealingWarmupRestarts(
         optimizer,
         first_cycle_steps=first_cycle_steps,
         cycle_mult=1.0,
         max_lr=0.0001,
-        min_lr=0.00001,
+        min_lr=0.000001,
         warmup_steps=int(first_cycle_steps * 0.25),
         gamma=0.5
     )
@@ -227,10 +235,9 @@ def main():
     best_loss = float("INF")
     best_mIoU = 0
     for epoch in range(args.epochs):
-        trn_loss, trn_mIoU, val_loss, val_mIoU = train_valid(epoch, model, trn_dl, val_dl,
-                                                             criterion, optimizer, scheduler,
-                                                             logger, device,
-                                                             args.cutmix_beta, augmix_data=augmix_data)
+        train(epoch, model, trn_dl, pseudo_dl, criterion, optimizer, scheduler, logger, device, augmix_data=augmix_data)
+        val_loss, val_mIoU = valid(epoch, model, val_dl, criterion, logger, device, debug=True)
+
 
         save_model(model, version=args.version, save_type='current')
         if best_loss > val_loss:

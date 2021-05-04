@@ -135,7 +135,10 @@ def train(cfg, run_name, train_loader, val_loader):
         with tqdm(train_loader, total=len(train_loader), unit='batch') as trn_bar:
             for batch, (images , masks) in enumerate(trn_bar):
                 trn_bar.set_description(f"Train Epoch {epoch+1}")
-                images, masks = images.to(device), masks.to(device).long()
+                images = torch.stack(images)       
+                masks = torch.stack(masks).long()  
+                
+                images, masks = images.to(device), masks.to(device)
                 
                 preds = model(images)
                 loss = criterion(preds, masks)
@@ -167,7 +170,9 @@ def train(cfg, run_name, train_loader, val_loader):
             with tqdm(val_loader, total=len(val_loader), unit='batch') as val_bar:
                  for batch, (images , masks) in enumerate(val_bar):
                     val_bar.set_description(f"Valid Epoch {epoch+1}")
-
+                    
+                    images = torch.stack(images)       
+                    masks = torch.stack(masks).long()  
                     images, masks = images.to(device), masks.to(device).long()
 
                     preds = model(images)

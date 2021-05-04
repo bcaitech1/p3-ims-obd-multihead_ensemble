@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-# from torchgeometry.losses import SSIM
-# import numpy as np
+from torchgeometry.losses import SSIM
+import numpy as np
 
 pos_weight = [
     0.3040,
@@ -344,25 +344,26 @@ class DiceFocalLoss(nn.Module):
         return dice_focal_loss
 
 
-# class TripleLoss(nn.Module):
-#     def __init__(self,alpha = 0.75, beta = 0.25 , gamma = 0.25):
-#         super(TripleLoss, self).__init__()
-#         self.alpha = alpha
-#         self.beta = beta
-#         self.gamma = gamma       
-#         self.dice = DiceLoss()
-#         self.focal = FocalLoss()
-#         self.ssim = SSIM(window_size = 11)
+class TripleLoss(nn.Module):
+    def __init__(self,alpha = 0.75, beta = 0.25 , gamma = 0.25):
+        super(TripleLoss, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma       
+        self.dice = DiceLoss()
+        self.focal = FocalLoss()
+        self.ssim = SSIM(window_size = 11  ,reduction = 'mean')
 
-#     def forward(self, inputs, targets):
-#         dice_loss = self.dice(inputs , targets)
-#         focal_loss = self.focal(inputs , targets)
-#         targets = targets.type(inputs.type()) 
-#         ss_input = F.softmax(inputs, dim=1).data.cpu()
-#         ss_input = torch.argmax(ss_input, axis=1)              # [B,1,H,W] 
-#         ssim_loss = self.ssim(ss_input, targets)
-#         triple_loss = self.alpha * focal_loss + self.beta * dice_loss + self.gamma * ssim_loss
-#         return triple_loss  
+    def forward(self, inputs, targets):
+        dice_loss = self.dice(inputs , targets)
+        focal_loss = self.focal(inputs , targets)
+        ss_input = F.softmax(inputs, dim=1)
+        ss_input = torch.argmax(ss_input, dim=1, keepdim=True).float()
+        h , w = targets.shape[1] , targets.shape[2]
+        targets = targets.view(-1 , 1, h, w).float()
+        ssim_loss = self.ssim(ss_input, targets)  
+        triple_loss = self.alpha * focal_loss + self.beta * dice_loss + self.gamma * ssim_loss
+        return triple_loss  
 
 #######################################################################################
 
@@ -424,7 +425,7 @@ _criterion_entrypoints = {
     'LovaszSoftmax' : LovaszSoftmax,
     'DiceCELoss' : DiceCELoss,
     'DiceFocalLoss' : DiceFocalLoss,
-#     'TripleLoss' : TripleLoss,
+    'TripleLoss' : TripleLoss,
 }
 
 def criterion_entrypoint(criterion_name):

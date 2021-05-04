@@ -54,7 +54,7 @@ class RecycleTrashDataset(Dataset):
                 masks = np.maximum(self.coco.annToMask(anns[i]) * pixel_value, masks)
             masks = masks.astype(np.float32)
             # img, mask 다 np , 512x512
-            if self.augmix is not None :
+            if self.augmix is not None and len(np.where(masks == 9)) < 43690:
                 r = np.random.rand(1)
                 if r < self.augmix_prob :
                     images , masks = self.augmix_search(images , masks)

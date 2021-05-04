@@ -85,7 +85,8 @@ def get_dataloader(data_dir='train.json', mode='train', transform=None, batch_si
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        drop_last=False
+        drop_last=True,
+        collate_fn = collate_fn
     )
 
     return loader

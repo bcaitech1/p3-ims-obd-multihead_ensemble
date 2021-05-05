@@ -1,92 +1,79 @@
+import torch
 import torch.nn as nn
+from torchvision import models
+import segmentation_models_pytorch as smp
 
-class FCN8s(nn.Module):
-	def __init__(self, backbone, num_cls=12):
-		super(FCN8s, self).__init__()
+class Effi_Unet_NS(nn.Module):  # Unet(EfficientNetB0 with noisy student)
+    def __init__(self, num_classes=12):
+        super(Effi_Unet_NS, self).__init__()
+        self.model = smp.Unet(
+            encoder_name="timm-efficientnet-b0",  # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+            encoder_weights="noisy-student",
+            in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+            classes = num_classes,  # model output channels (number of classes in your dataset)
+        )
+    def forward(self,x):
+        return self.model(x)
 
-		self.backbone = backbone
-		features = list(self.backbone.features.children())
-		classifiers = list(self.backbone.classifier.children())
+class UnetPlusPlus(nn.Module):  # Unet(EfficientNetB0 with noisy student)
+    def __init__(self, num_classes=12):
+        super(UnetPlusPlus, self).__init__()
+        self.model = smp.UnetPlusPlus(
+            encoder_name="timm-efficientnet-b3",  # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+            encoder_weights="noisy-student",
+            in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+            classes = num_classes,  # model output channels (number of classes in your dataset)
+        )
+    def forward(self,x):
+        return self.model(x)
+        
+class DeepLabV3(nn.Module):
+    def __init__(self, num_classes=12):
+        super(DeepLabV3, self).__init__()
+        self.model = smp.DeepLabV3(
+            encoder_name='efficientnet-b0',
+            encoder_weights='imagenet',
+            in_channels=3,
+            classes=num_classes
+        )
+    def forward(self,x):
+        return self.model(x)
 
-		self.features_map1 = nn.Sequential(*features[0:17])
-		self.features_map2 = nn.Sequential(*features[17:24])
-		self.features_map3 = nn.Sequential(*features[24:31])
-
-		# Score pool3
-		self.score_pool3_fr = nn.Conv2d(256, num_cls, 1)
-
-		# Score pool4
-		self.score_pool4_fr = nn.Conv2d(512, num_cls, 1)
-
-		# fc6 ~ fc7
-		self.conv = nn.Sequential(nn.Conv2d(512, 4096, kernel_size=1),
-								  nn.ReLU(inplace=True),
-								  nn.Dropout(),
-								  nn.Conv2d(4096, 4096, kernel_size=1),
-								  nn.ReLU(inplace=True),
-								  nn.Dropout()
-								  )
-
-		self.score_fr = nn.Conv2d(4096, num_cls, kernel_size=1)
-
-		# UpScore2 using deconv
-		self.upscore2 = nn.ConvTranspose2d(num_cls,
-										   num_cls,
-										   kernel_size=4,
-										   stride=2,
-										   padding=1)
-
-		# UpScore2_pool4 using deconv
-		self.upscore2_pool4 = nn.ConvTranspose2d(num_cls,
-												 num_cls,
-												 kernel_size=4,
-												 stride=2,
-												 padding=1)
-
-		# UpScore8 using deconv
-		self.upscore8 = nn.ConvTranspose2d(num_cls,
-										   num_cls,
-										   kernel_size=16,
-										   stride=8,
-										   padding=4)
-
-	def forward(self, x):
-		pool3 = h = self.features_map1(x)
-		pool4 = h = self.features_map2(h)
-		h = self.features_map3(h)
-
-		h = self.conv(h)
-		h = self.score_fr(h)
-
-		score_pool3c = self.score_pool3_fr(pool3)
-		score_pool4c = self.score_pool4_fr(pool4)
-
-		# Up Score I
-		upscore2 = self.upscore2(h)
-
-		# Sum I
-		h = upscore2 + score_pool4c
-
-		# Up Score II
-		upscore2_pool4c = self.upscore2_pool4(h)
-
-		# Sum II
-		h = upscore2_pool4c + score_pool3c
-
-		# Up Score III
-		upscore8 = self.upscore8(h)
-
-		return upscore8
+    
+class DeepLabV3Plus(nn.Module):
+    def __init__(self, num_classes=12):
+        super(DeepLabV3Plus, self).__init__()
+        self.model = smp.DeepLabV3Plus(
+            encoder_name='efficientnet-b3',
+            encoder_weights='imagenet',
+            in_channels=3,
+            classes=num_classes
+        )
+    def forward(self,x):
+        return self.model(x)
+    
+    
+class PSPNet(nn.Module):
+    def __init__(self, num_classes=12):
+        super(PSPNet, self).__init__()
+        self.model = smp.PSPNet(
+            encoder_name='efficientnet-b0',
+            encoder_weights='imagenet',
+            in_channels=3,
+            classes=num_classes
+        )
+    def forward(self,x):
+        return self.model(x)
 
 
 if __name__ == "__main__":
-	import torch
-	from torchvision.models import vgg16
+    import torch
+    from torchvision.models import vgg16
 
-	backbone = vgg16(pretrained=False)
-	model = FCN8s(backbone=backbone, num_cls=12)
+    backbone = vgg16(pretrained=False)
+    model = FCN8s(backbone=backbone, num_cls=12)
 
-	with torch.no_grad():
-		tmp_input = torch.zeros((2, 3, 512, 512))
-		tmp_output = model(tmp_input)
-		print(tmp_output.shape)
+    with torch.no_grad():
+        tmp_input = torch.zeros((2, 3, 512, 512))
+        tmp_output = model(tmp_input)
+        print(tmp_output.shape)

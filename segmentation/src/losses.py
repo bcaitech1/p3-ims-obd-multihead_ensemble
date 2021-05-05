@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from torch.autograd import Variable
+from pytorch_msssim import ssim, ms_ssim, SSIM, MS_SSIM
 """
     https://www.kaggle.com/bigironsphere/loss-function-library-keras-pytorch
         - DiceLoss
@@ -19,12 +20,17 @@ class DiceLoss(nn.Module):
         super(DiceLoss, self).__init__()
 
     def forward(self, inputs, targets, smooth=1):
-        # flatten label and prediction tensors
-        inputs = inputs.view(-1)
-        targets = targets.view(-1)
+        num_classes = inputs.size(1)
+        true_1_hot = torch.eye(num_classes)[targets]
 
-        intersection = (inputs * targets).sum()
-        dice = (2. * intersection + smooth) / (inputs.sum() + targets.sum() + smooth)
+        true_1_hot = true_1_hot.permute(0, 3, 1, 2).float()
+        probas = F.softmax(inputs, dim=1)
+
+        true_1_hot = true_1_hot.type(inputs.type())
+        dims = (0,) + tuple(range(2, targets.ndimension()))
+        intersection = torch.sum(probas * true_1_hot, dims)
+        cardinality = torch.sum(probas + true_1_hot, dims)
+        dice = ((2. * intersection + smooth) / (cardinality + smooth)).mean()
 
         return 1 - dice
 
@@ -52,47 +58,69 @@ class DiceCELoss(nn.Module):
         dice_bce = ce * 0.8 + dice_loss * 0.2
         return dice_bce
 
-
 class IoULoss(nn.Module):
-    def __init__(self, weight=None, size_average=True):
+    def __init__(self):
         super(IoULoss, self).__init__()
+        self.eps = 1e-8
 
-    def forward(self, inputs, targets, smooth=1):
-        # flatten label and prediction tensors
-        inputs = F.sigmoid(inputs)
-        inputs = inputs.view(-1)
-        targets = targets.view(-1)
+    def forward(self, inputs , targets):
+        """Computes the Jaccard loss, a.k.a the IoU loss.
+        Notes: [Batch size,Num classes,Height,Width]
+        Args:
+            targets: a tensor of shape [B, H, W] or [B, 1, H, W].
+            inputs: a tensor of shape [B, C, H, W]. Corresponds to
+                the raw output or logits of the model. (prediction)
+            eps: added to the denominator for numerical stability.
+        Returns:
+            iou: the average class intersection over union value
+                for multi-class image segmentation
+        """
+        num_classes = inputs.shape[1]
+        # Single class segmentation?
+        if num_classes == 1:
+            true_1_hot = torch.eye(num_classes + 1)[targets.squeeze(1)]
+            true_1_hot = true_1_hot.permute(0, 3, 1, 2).float()
+            true_1_hot_f = true_1_hot[:, 0:1, :, :]
+            true_1_hot_s = true_1_hot[:, 1:2, :, :]
+            true_1_hot = torch.cat([true_1_hot_s, true_1_hot_f], dim=1)
+            pos_prob = torch.sigmoid(inputs)
+            neg_prob = 1 - pos_prob
+            probas = torch.cat([pos_prob, neg_prob], dim=1)
+        # Multi-class segmentation
+        else:
+            # Convert target to one-hot encoding
+            # true_1_hot = torch.eye(num_classes)[torch.squeeze(targets,1)]
+            true_1_hot = torch.eye(num_classes)[targets.squeeze(1)]
+            # Permute [B,H,W,C] to [B,C,H,W]
+            true_1_hot = true_1_hot.permute(0, 3, 1, 2).float()
+            # Take softmax along class dimension; all class probs add to 1 (per pixel)
+            probas = F.softmax(inputs, dim=1)
+        true_1_hot = true_1_hot.type(inputs.type())
+        # Sum probabilities by class and across batch images
+        dims = (0,) + tuple(range(2, targets.ndimension()))
+        intersection = torch.sum(probas * true_1_hot, dims) # [class0,class1,class2,...]
+        cardinality = torch.sum(probas + true_1_hot, dims)  # [class0,class1,class2,...]
+        union = cardinality - intersection
+        iou = (intersection / (union + self.eps)).mean()   # find mean of class IoU values
+        return 1 - iou
 
-        # intersection is equivalent to True Positive count
-        # union is the mutually inclusive area of all labels & predictions
-        intersection = (inputs * targets).sum()
-        total = (inputs + targets).sum()
-        union = total - intersection
-
-        IoU = (intersection + smooth) / (union + smooth)
-
-        return 1 - IoU
 
 
 class FocalLoss(nn.Module):
-    def __init__(self, alpha=0.5, gamma=2, weight=None, size_average=True):
+    def __init__(self, gamma=2, alpha=.25, eps=1e-7, weights=None):
         super(FocalLoss, self).__init__()
-
-        self.alpha= alpha
         self.gamma = gamma
+        self.alpha = alpha
+        self.eps = eps
+        self.weight = weights
 
-    def forward(self, inputs, targets, smooth=1):
-        # flatten label and prediction tensors
-        inputs = inputs.view(-1)
-        targets = targets.view(-1)
+    def forward(self, inp, tar):
+        logp = F.log_softmax(inp, dim=1)
+        ce_loss = F.nll_loss(logp, tar, weight=self.weight, reduction='none')
+        pt = torch.exp(-ce_loss)
 
-        # first compute binary cross-entropy
-        BCE = F.binary_cross_entropy(inputs, targets, reduction='mean')
-        BCE_EXP = torch.exp(-BCE)
-        focal_loss = self.alpha * (1 - BCE_EXP) ** self.gamma * BCE
-
-        return focal_loss
-
+        loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        return loss.mean()
 
 class TverskyLoss(nn.Module):
     def __init__(self, alpha=0.5, beta=0.5, weight=None, size_average=True):
@@ -161,3 +189,54 @@ class ComboLoss(nn.Module):
         combo = (self.ce_ratio * weighted_ce) - ((1 - self.ce_ratio) * dice)
 
         return combo
+
+
+class TripleLoss(nn.Module):
+    def __init__(self):
+        super(TripleLoss , self).__init__()
+        self.f1 = FocalLoss()
+        self.iou = IoULoss()
+        self.msssim = MS_SSIM(data_range=1, size_average=True, channel = 12)
+    
+    def forward(self, inputs, targets):
+        target = targets.unsqueeze(1)
+        target = target.expand(-1,12,-1,-1).float()
+        return self.f1(inputs, targets) + self.iou(inputs,targets) + (1 - self.msssim(inputs,target))
+
+class DoubleLoss(nn.Module):
+    def __init__(self):
+        super(DoubleLoss , self).__init__()
+        self.f1 = FocalLoss()
+        self.iou = IoULoss()
+    
+    def forward(self, inputs, targets):
+        return self.f1(inputs, targets) + self.iou(inputs,targets)
+    
+    
+_criterion_entrypoints = {
+    'CELoss': nn.CrossEntropyLoss,
+    'DiceLoss': DiceLoss,
+    'DiceCELoss': DiceCELoss,
+    'IoULoss': IoULoss,
+    'FocalLoss' : FocalLoss,
+    'TverskyLoss' : TverskyLoss,
+    'FocalTverskyLoss' : FocalTverskyLoss,
+    'ComboLoss' : ComboLoss,
+    'TripleLoss' : TripleLoss,
+    'DoubleLoss' : DoubleLoss
+}
+
+def criterion_entrypoint(criterion_name):
+    return _criterion_entrypoints[criterion_name]
+
+
+def is_criterion(criterion_name):
+    return criterion_name in _criterion_entrypoints
+
+def create_criterion(criterion_name, **kwargs):
+    if is_criterion(criterion_name):
+        create_fn = criterion_entrypoint(criterion_name)
+        criterion = create_fn(**kwargs)
+    else:
+        raise RuntimeError('Unknown loss (%s)' % criterion_name)
+    return criterion

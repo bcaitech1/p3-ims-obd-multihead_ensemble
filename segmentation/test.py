@@ -17,25 +17,29 @@ from src.utils import cls_colors
 from src.dataset import SegmentationDataset
 from src.models import *
 
+from importlib import import_module
 
 def main():
     parser = argparse.ArgumentParser(description="MultiHead Ensemble Team")
+    # Hyperparameter
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--batch_size', default=2, type=int)
+    parser.add_argument('--batch_size', default=32, type=int)
     parser.add_argument('--postfix', default='effib3_unet_v1', type=str)
-    parser.add_argument('--ckpt', default='effib3_unet_v1/best_mIoU.pth', type=str)
-    parser.add_argument('--model_type', default='unet', type=str)
     parser.add_argument('--debug', default=0, type=int)
-
+    parser.add_argument('--num_workers', default='3', type=int)
+    # Model_Type
+    parser.add_argument('--model_type', default='FCN8s', type=str , help = 'ex) Unet , Deeplabv3, FCN8s ,SegNet')
+    # Path 
+    parser.add_argument('--data_path', default='/opt/ml/input/data', type=str)
+    parser.add_argument('--ckpt', default='segnet_v1/best_mIoU.pth', type=str)
     args = parser.parse_args()
     print(args)
 
     # for reproducibility
     seed_everything(args.seed)
 
-    main_path = '.'
-    data_path = os.path.join(main_path, 'input', 'data')
-    test_annot = os.path.join(data_path, 'test.json')
+
+    test_annot = os.path.join(args.data_path, 'test.json')
     test_cat = make_cat_df(test_annot, debug=True)
 
     test_tfms = A.Compose([
@@ -48,23 +52,15 @@ def main():
 
     test_ds = SegmentationDataset(data_dir=test_annot, cat_df=test_cat, mode='test', transform=test_tfms)
     test_dl = DataLoader(dataset=test_ds,
-                         batch_size=32,
+                         batch_size=args.batch_size,
                          shuffle=False,
-                         num_workers=3)
+                         num_workers=args.num_workers)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    if args.model_type == "fcn8s":
-        backbone = vgg16(pretrained=False)
-        model = FCN8s(backbone)
-    elif args.model_type == 'unet':
-        model = smp.Unet(
-            encoder_name="efficientnet-b3",  # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
-            encoder_weights="imagenet",
-            in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
-            classes=12,  # model output channels (number of classes in your dataset)
-        )
 
-    model = model.to(device)
+    model_module = getattr(import_module("src.models"), args.model_type)
+    model = model_module(num_classes = 12).to(device)
+
     model.load_state_dict(torch.load(os.path.join("./ckpts", args.ckpt)))
 
     model.eval()
@@ -89,7 +85,7 @@ def main():
                 pred_masks = torch.argmax(preds.squeeze(), dim=1).detach().cpu().numpy()
                 for idx, file_name in enumerate(file_names):
                     pred_mask = pred_masks[idx]
-                    ori_image = cv2.imread(os.path.join('.', 'input', 'data', file_name))
+                    ori_image = cv2.imread(os.path.join(args.data_path, file_name))
                     ori_image = ori_image.astype(np.float32)
 
                     for i in range(1, 12):
@@ -119,7 +115,7 @@ def main():
 
     print("Saving...")
     file_names = [y for x in file_name_list for y in x]
-    submission = pd.read_csv('./submission/sample_submission.csv', index_col=None)
+    submission = pd.read_csv('/opt/ml/code/submission/sample_submission.csv', index_col=None)
     for file_name, string in zip(file_names, preds_array):
         submission = submission.append(
             {"image_id": file_name, "PredictionString": ' '.join(str(e) for e in string.tolist())},
@@ -131,6 +127,7 @@ def main():
 
     save_dir = os.path.join(save_path, f'{args.postfix}.csv')
     submission.to_csv(save_dir, index=False)
+    print(f"Saved in {save_dir}")
     print("All done.")
 
 if __name__ == '__main__':

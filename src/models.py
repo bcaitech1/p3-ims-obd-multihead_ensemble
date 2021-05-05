@@ -108,12 +108,29 @@ class DeepLabv3Plus(nn.Module):
 
 class UnetPlusPlus(nn.Module):
     def __init__(self, num_classes=12):
-        super(UnetPlusPlus, self.__init__())
+        super(UnetPlusPlus, self).__init__()
         self.model = smp.UnetPlusPlus(
-            encoder_name="efficientent-b3",
+            encoder_name="efficientnet-b3",
             encoder_weights="imagenet",
             in_channels=3,
             classes=num_classes,
             )
+    def forward(self, x):
+        return self.model(x)
+
+class PSPNet(nn.Module):
+    def __init__(self, num_classes=12):
+        super(PSPNet, self).__init__()
+        self.model = smp.PSPNet(
+            encoder_name="efficientnet-b3",
+            encoder_weights="imagenet",
+            in_channels=3,
+            psp_out_channels=512, # A number of filters in Spatial Pyramid
+            psp_use_batchnorm=True,
+            psp_dropout=0.2,
+            classes=num_classes,
+            activation=None, 
+            upsampling=8, 
+            aux_params=None)
     def forward(self, x):
         return self.model(x)

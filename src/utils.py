@@ -28,8 +28,11 @@ def make_dir(directory):
     if len(lists) == 0:
         save_dir = os.path.join(directory, "exp1")
     else:
-        lists = [int(l[(l.index("exp") + 3):]) for l in lists]
-        save_dir = os.path.join(directory, "exp" + str(max(lists) + 1))
+        nums = []
+        for l in lists:
+            if "exp" in l:
+                nums.append(int(l[(l.index("exp") + 3):]))
+        save_dir = os.path.join(directory, "exp" + str(max(nums) + 1))
     
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -193,16 +196,28 @@ class CosineAnnealingWarmupRestarts(_LRScheduler):
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
 
+   
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group["lr"]
+
 def dense_crf_wrapper(args):
     return dense_crf(args[0], args[1])
 
 def dense_crf(img, output_probs):
-    MAX_ITER = 10
+    # MAX_ITER = 10
+    # POS_W = 3
+    # POS_XY_STD = 1
+    # Bi_W = 4
+    # Bi_XY_STD = 67
+    # Bi_RGB_STD = 3
+
+    MAX_ITER = 50
     POS_W = 3
-    POS_XY_STD = 1
+    POS_XY_STD = 3
     Bi_W = 4
-    Bi_XY_STD = 67
-    Bi_RGB_STD = 3
+    Bi_XY_STD = 49
+    Bi_RGB_STD = 5
 
     c = output_probs.shape[0]
     h = output_probs.shape[1]
@@ -222,11 +237,17 @@ def dense_crf(img, output_probs):
     Q = np.array(Q).reshape((c, h, w))
     return Q
 
-    
-def get_lr(optimizer):
-    for param_group in optimizer.param_groups:
-        return param_group["lr"]
 
 def save_pickle(data, path):
     with open(path, 'wb') as f:
         pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
+
+def str2bool(v): 
+    if isinstance(v, bool): 
+        return v 
+    if v.lower() in ('yes', 'true', 't', 'y', '1'): 
+        return True 
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'): 
+        return False 
+    else: 
+        raise argparse.ArgumentTypeError('Boolean value expected.')

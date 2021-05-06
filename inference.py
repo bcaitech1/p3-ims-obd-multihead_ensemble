@@ -132,7 +132,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--saved_dir", type=str, default="./checkpoints/exp1")
+    parser.add_argument("--saved_dir", type=str, default="./checkpoints/exp9")
     parser.add_argument("--submission_dir", type=str, default="./submission")
     parser.add_argument("--save_name", type=str, default="unet++_iou")
     parser.add_argument("--is_crf", type=str2bool, default=True)

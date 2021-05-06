@@ -9,7 +9,7 @@ import albumentations.pytorch
 import segmentation_models_pytorch as smp
 import torch.nn as nn
 import torch.nn.functional as F
-import ttach as tta
+
 
 from importlib import import_module
 from prettyprinter import cpprint
@@ -22,12 +22,15 @@ from src.utils import seed_everything, YamlConfigManager, get_dataloader, dense_
 
 def test(cfg, crf):    
     SEED = cfg.values.seed    
-    BACKBONE = cfg.values.backbone
-    MODEL_ARC = cfg.values.model_arc
+    BACKBONE_1 = cfg.values.backbone1
+    BACKBONE_2 = cfg.values.backbone2
+    MODEL_ARC_1 = cfg.values.model_arc1
+    MODEL_ARC_2 = cfg.values.model_arc2
     IMAGE_SIZE = cfg.values.image_size
     NUM_CLASSES = cfg.values.num_classes
 
-    checkpoint = cfg.values.checkpoint
+    checkpoint1 = cfg.values.checkpoint1
+    checkpoint2 = cfg.values.checkpoint2
     test_batch_size = cfg.values.test_batch_size
 
     # for reproducibility
@@ -40,7 +43,8 @@ def test(cfg, crf):
     test_transform = albumentations.Compose([
         albumentations.Resize(IMAGE_SIZE, IMAGE_SIZE),
         albumentations.Normalize(mean=(0.461, 0.440, 0.419), std=(0.211, 0.208, 0.216)),
-        albumentations.pytorch.transforms.ToTensorV2()])
+        albumentations.pytorch.transforms.ToTensorV2()
+    ])
     
     size = 256
     resize = albumentations.Resize(size, size)
@@ -49,55 +53,64 @@ def test(cfg, crf):
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    model_module = getattr(import_module('segmentation_models_pytorch'), MODEL_ARC)
-
     aux_params=dict(
         pooling='avg',
         dropout=0.5,
         activation=None,
         classes=12
     )
-
-    pre_model = model_module(
-        encoder_name=BACKBONE,
+    
+    model_module1 = getattr(import_module('segmentation_models_pytorch'), MODEL_ARC_1)
+    model1 = model_module1(
+        encoder_name=BACKBONE_1,
         in_channels=3,
         classes=NUM_CLASSES,
-        aux_params=aux_params
+        aux_params = aux_params
     )
+    model1 = model1.to(device)
+    model1.load_state_dict(torch.load(os.path.join(checkpoint_path, checkpoint1)))
     
-    pre_model.load_state_dict(torch.load(os.path.join(checkpoint_path, checkpoint)))
     
-    class modify_model(nn.Module):
-        def __init__(self , model):
-            super(modify_model, self).__init__()
-            self.model = model
-        def forward(self,x):
-            x , _ = self.model(x)
-            return x 
-        
-    model = modify_model(pre_model)    
-    model = model.to(device)
-
-
-    tta_transforms = tta.Compose([
-        tta.HorizontalFlip(),
-        tta.Rotate90(angles=[0, 180]),
-    ])
-
-    tta_model = tta.SegmentationTTAWrapper(model, tta_transforms, merge_mode='mean')
+    class UnetPlusPlus(nn.Module):
+        def __init__(self, num_classes=12):
+            super(UnetPlusPlus, self).__init__()
+            self.model = smp.UnetPlusPlus(
+                encoder_name="efficientnet-b3",
+                encoder_weights="imagenet",
+                in_channels=3,
+                classes=num_classes,
+                )
+        def forward(self, x):
+            return self.model(x)
+    
+    model2 = UnetPlusPlus()
+    
+#     model_module2 = getattr(import_module('segmentation_models_pytorch'), MODEL_ARC_2)
+#     model2 = model_module2(
+#         encoder_name=BACKBONE_2,
+#         in_channels=3,
+#         classes=NUM_CLASSES
+#     )
+    model2 = model2.to(device)
+    model2.load_state_dict(torch.load(os.path.join(checkpoint_path, checkpoint2)))  
+    
     
     print('Start prediction.')
-    model.eval()
-
+    model1.eval()
+    model2.eval()
+    
     file_name_list = []
     preds_array = np.empty((0, size * size), dtype=np.compat.long)
 
     with torch.no_grad():
         for step, (imgs, image_infos) in enumerate(tqdm(test_loader, desc='Test : ')):
 
-            # inference (512 x 512)
-#             outs,_ = tta_model(torch.stack(imgs).to(device))
-            outs = tta_model(torch.stack(imgs).to(device))
+            # Weighted soft voting
+            outs1, _ = model1(torch.stack(imgs).to(device))
+            outs2 = model2(torch.stack(imgs).to(device))
+            
+            outs  = 0.4 * outs1 + 0.6 * outs2 
+
             probs = F.softmax(outs, dim=1).data.cpu().numpy()
             
             if crf:                
@@ -141,7 +154,7 @@ def make_submission(cfg, crf):
 
     # submission.csv로 저장
     os.makedirs('./submission', exist_ok=True)
-    submission.to_csv(f"./submission/{cfg.values.backbone}_{cfg.values.model_arc}_{args.save_name}.csv", index=False)
+    submission.to_csv(f"./submission/ensemble.csv", index=False)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

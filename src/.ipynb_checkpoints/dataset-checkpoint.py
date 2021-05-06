@@ -2,11 +2,15 @@
 import os
 import cv2
 import numpy as np
+import pandas as pd
 import random
 from pycocotools.coco import COCO
 
+import albumentations as A
+
 import torch
 from torch.utils.data import Dataset
+
 
 
 dataset_path = '/opt/ml/input/data'
@@ -47,12 +51,18 @@ class RecycleTrashDataset(Dataset):
             # 각각의 pixel 값에는 "category id + 1" 할당
             # Background = 0
             masks = np.zeros((image_infos["height"], image_infos["width"]))
+        
             # Unknown = 1, General trash = 2, ... , Cigarette = 11
             for i in range(len(anns)):
                 className = get_classname(anns[i]['category_id'], cats)
                 pixel_value = category_names.index(className)
                 masks = np.maximum(self.coco.annToMask(anns[i]) * pixel_value, masks)
             masks = masks.astype(np.float32)
+        
+            # one-hot
+            target = np.unique(masks).astype(int)
+            one_hot_label = np.sum(np.eye(12)[target], axis=0)
+            
             # img, mask 다 np , 512x512
             if self.augmix is not None and len(np.where(masks == 9)) < 43690:
                 r = np.random.rand(1)
@@ -64,7 +74,7 @@ class RecycleTrashDataset(Dataset):
                 images = transformed["image"]
                 masks = transformed["mask"]
             
-            return images, masks
+            return images, masks, torch.Tensor(one_hot_label) 
         
         if self.mode == 'test':
             # transform -> albumentations 라이브러리 활용
@@ -98,3 +108,37 @@ class RecycleTrashDataset(Dataset):
         masks[augmix_mask!= 0] = augmix_mask[augmix_mask != 0]
         
         return images, masks
+    
+    
+class PseudoDataset(Dataset):
+    def __init__(self, data_dir, pseudo_csv, transform=None, binary_mask=False):
+        self.data_dir = data_dir
+        self.df = pd.read_csv(os.path.join(data_dir, pseudo_csv))
+        self.tfms = A.Resize(512, 512, interpolation= cv2.INTER_NEAREST)
+        self.binary_mask = binary_mask
+        self.transform = transform
+        
+    def __getitem__(self, idx):
+        img_path = self.df.iloc[idx, 0]
+        img_path = os.path.join(self.data_dir, img_path)
+        masks = self.df.iloc[idx, 1]
+        masks = np.array(list(map(int, masks.split())))
+        masks = masks.reshape(256, 256)
+        masks = self.tfms(image=masks)['image']
+        images = cv2.imread(img_path)
+        images = cv2.cvtColor(images, cv2.COLOR_BGR2RGB).astype(np.uint8)
+        if self.transform is not None:
+            transformed = self.transform(image=images, mask=masks)
+            images = transformed["image"]
+            masks = transformed["mask"]
+            
+        # one-hot
+        target = np.unique(masks).astype(int)
+        one_hot_label = np.sum(np.eye(12)[target], axis=0)
+            
+        if self.binary_mask:
+                masks = mask_to_binarymask(masks).float()
+        return images, masks , torch.Tensor(one_hot_label), image_infos 
+
+    def __len__(self):
+        return len(self.df)

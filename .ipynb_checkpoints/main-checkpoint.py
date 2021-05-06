@@ -12,6 +12,7 @@ from prettyprinter import cpprint
 
 from src.train import train
 from src.utils import YamlConfigManager, seed_everything, get_dataloader
+from src.add_train import *
 
 def main(cfg):
     SEED = cfg.values.seed
@@ -48,6 +49,14 @@ def main(cfg):
     # define augmentation
     train_transform = A.Compose([
           A.Resize (IMAGE_SIZE, IMAGE_SIZE , p=1),
+          A.Rotate (limit = 30, p=1),
+          A.Cutout (num_holes=4, max_h_size=20, max_w_size=20,p=0.5),
+          A.CLAHE (p=1),
+          A.OneOf([
+              A.ElasticTransform(p=0.5, alpha=30, sigma=120 * 0.05, alpha_affine=120 * 0.03),
+              A.GridDistortion(p=0.5),
+          ], p = 0.5),
+          A.RandomBrightnessContrast(brightness_by_max=False, p=0.5),
           A.Normalize(),
           ToTensorV2()
         ])
@@ -58,12 +67,16 @@ def main(cfg):
             ToTensorV2()
         ])
 
+
     
     # define loader
     train_loader = get_dataloader(data_dir=train_path, mode='train', transform=train_transform, batch_size=TRAIN_BATCH_SIZE, shuffle=True, augmix=augmix, augmix_prob=AUGMIX_PROB, num_workers=NUM_WORKERS)
     val_loader = get_dataloader(data_dir=val_path, mode='val', transform=val_transform, batch_size=VAL_BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
-
-    train(cfg, args.run_name, train_loader, val_loader)
+    psuedo_loader = get_dataloader(data_dir=val_path, mode='psuedo', transform=val_transform, batch_size=VAL_BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
+    pseudo_train(cfg, args.run_name, train_loader, psuedo_loader, val_loader)
+    
+#     train(cfg, args.run_name, psuedo_loader, val_loader)
+#     train(cfg, args.run_name, train_loader, val_loader)
 
 
 if __name__ == '__main__':

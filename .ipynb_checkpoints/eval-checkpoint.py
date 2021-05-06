@@ -9,7 +9,7 @@ import albumentations.pytorch
 import segmentation_models_pytorch as smp
 import torch.nn as nn
 import torch.nn.functional as F
-
+import ttach as tta
 
 from importlib import import_module
 from prettyprinter import cpprint
@@ -18,7 +18,6 @@ from tqdm import tqdm
 import torch
 
 from src.utils import seed_everything, YamlConfigManager, get_dataloader, dense_crf_wrapper
-from src.model import *
 
 
 def test(cfg, crf):    
@@ -36,7 +35,7 @@ def test(cfg, crf):
 
     data_path = '/opt/ml/input/data'
     test_annot = os.path.join(data_path, 'test.json')
-    checkpoint_path = f'/opt/ml/vim-hjk/results/{MODEL_ARC}'
+    checkpoint_path = '/opt/ml/p3-ims-obd-multihead_ensemble/ckpts'
 
     test_transform = albumentations.Compose([
         albumentations.Resize(IMAGE_SIZE, IMAGE_SIZE),
@@ -46,7 +45,7 @@ def test(cfg, crf):
     size = 256
     resize = albumentations.Resize(size, size)
     
-    test_loader = get_dataloader(data_dir=test_annot, mode='test', transform=test_transform, batch_size=test_batch_size, shuffle=False)
+    test_loader = get_dataloader(data_dir='test.json', mode='test', transform=test_transform, batch_size=test_batch_size, shuffle=False)
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -59,15 +58,34 @@ def test(cfg, crf):
         classes=12
     )
 
-    model = model_module(
+    pre_model = model_module(
         encoder_name=BACKBONE,
         in_channels=3,
         classes=NUM_CLASSES,
         aux_params=aux_params
     )
-
+    
+    pre_model.load_state_dict(torch.load(os.path.join(checkpoint_path, checkpoint)))
+    
+    class modify_model(nn.Module):
+        def __init__(self , model):
+            super(modify_model, self).__init__()
+            self.model = model
+        def forward(self,x):
+            x , _ = self.model(x)
+            return x 
+        
+    model = modify_model(pre_model)    
     model = model.to(device)
-    model.load_state_dict(torch.load(os.path.join(checkpoint_path, checkpoint)))
+
+
+    tta_transforms = tta.Compose([
+        tta.HorizontalFlip(),
+        tta.Rotate90(angles=[0, 180]),
+    ])
+
+    tta_model = tta.SegmentationTTAWrapper(model, tta_transforms, merge_mode='mean')
+    
     print('Start prediction.')
     model.eval()
 
@@ -78,7 +96,8 @@ def test(cfg, crf):
         for step, (imgs, image_infos) in enumerate(tqdm(test_loader, desc='Test : ')):
 
             # inference (512 x 512)
-            outs, _ = model(torch.stack(imgs).to(device))
+#             outs,_ = tta_model(torch.stack(imgs).to(device))
+            outs = tta_model(torch.stack(imgs).to(device))
             probs = F.softmax(outs, dim=1).data.cpu().numpy()
             
             if crf:                
@@ -122,13 +141,14 @@ def make_submission(cfg, crf):
 
     # submission.csv로 저장
     os.makedirs('./submission', exist_ok=True)
-    submission.to_csv(f"./submission/{cfg.values.backbone}_{cfg.values.model_arc}.csv", index=False)
+    submission.to_csv(f"./submission/{cfg.values.backbone}_{cfg.values.model_arc}_{args.save_name}.csv", index=False)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--eval_config_file_path', type=str, default='./config/eval_config.yml')
     parser.add_argument('--eval_config', type=str, default='base')
     parser.add_argument('--crf', type=bool, default=False)
+    parser.add_argument('--save_name', type=str, default='base')
     
     args = parser.parse_args()
     cfg = YamlConfigManager(args.eval_config_file_path, args.eval_config)

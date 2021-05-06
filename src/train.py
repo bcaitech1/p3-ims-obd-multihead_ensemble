@@ -77,6 +77,12 @@ def train(cfg, run_name, train_loader, val_loader):
     min_lr = cfg.values.train_args.min_lr     # for cosineannealingscheduler
     weight_decay = cfg.values.train_args.weight_decay    
 
+    aux_params=dict(
+        pooling='avg',
+        dropout=0.5,
+        activation=None,
+        classes=12
+    )   
     
     # define model 
     model_module = getattr(import_module('segmentation_models_pytorch'), MODEL_ARC)    
@@ -84,36 +90,39 @@ def train(cfg, run_name, train_loader, val_loader):
         encoder_name=BACKBONE,
         encoder_weights=BACKBONE_WEIGHT,
         in_channels=3,
-        classes=NUM_CLASSES
+        classes=NUM_CLASSES,
+        aux_params=aux_params
     )
     model.to(device)
+    # 모델 불러오기
+    model.load_state_dict(torch.load('/opt/ml/p3-ims-obd-multihead_ensemble/ckpts/madgrad/best_mIoU.pth'))
     
 
     # define optimizer & scheduler
     OPTIMIZER = cfg.values.optimizer
     
     if OPTIMIZER == 'MADGRAD':
-        optimizer = MADGRAD(params=model.parameters(),lr=max_lr, weight_decay=weight_decay) 
+        optimizer = MADGRAD(params=model.parameters(),lr=min_lr, weight_decay=weight_decay) 
         
     elif OPTIMIZER in ['AdamW' , 'Adam']:
         opt_module = getattr(import_module("torch.optim") ,OPTIMIZER) #default : Adam
-        optimizer = opt_module(params=model.parameters(),lr=max_lr, weight_decay=weight_decay) 
+        optimizer = opt_module(params=model.parameters(),lr=min_lr, weight_decay=weight_decay) 
         
     else :
         opt_module = getattr(import_module("torch_optimizer") ,OPTIMIZER)
-        optimizer = opt_module(params=model.parameters(),lr=max_lr, weight_decay=weight_decay) 
+        optimizer = opt_module(params=model.parameters(),lr=min_lr, weight_decay=weight_decay) 
     
-    first_cycle_steps = len(train_loader) * num_epochs // 3
-    scheduler = CosineAnnealingWarmupRestarts(
-        optimizer, 
-        first_cycle_steps=first_cycle_steps, 
-        cycle_mult=1.0, 
-        max_lr=max_lr, 
-        min_lr=min_lr, 
-        warmup_steps=int(first_cycle_steps * 0.25), 
-        gamma=0.5
-    )
-    
+#     first_cycle_steps = len(train_loader) * num_epochs // 3
+#     scheduler = CosineAnnealingWarmupRestarts(
+#         optimizer, 
+#         first_cycle_steps=first_cycle_steps, 
+#         cycle_mult=1.0, 
+#         max_lr=max_lr, 
+#         min_lr=min_lr, 
+#         warmup_steps=int(first_cycle_steps * 0.25), 
+#         gamma=0.5
+#     )
+    scheduler = None
 
     # criterion 
     CRITEROIN  = cfg.values.criterion
@@ -140,14 +149,15 @@ def train(cfg, run_name, train_loader, val_loader):
                 
                 images, masks = images.to(device), masks.to(device)
                 
-                preds = model(images)
+                preds, _ = model(images)
                 loss = criterion(preds, masks)
                 
                 # compute gradient and do optimizer step
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                scheduler.step()
+                if scheduler is not None:
+                    scheduler.step()
 
                 preds = torch.argmax(preds, dim=1).detach().cpu().numpy()
                 hist = add_hist(hist, masks.detach().cpu().numpy(), preds, n_class=12)
@@ -175,7 +185,7 @@ def train(cfg, run_name, train_loader, val_loader):
                     masks = torch.stack(masks).long()  
                     images, masks = images.to(device), masks.to(device).long()
 
-                    preds = model(images)
+                    preds, _ = model(images)
                     loss = criterion(preds, masks)
                     val_losses.append(loss.item())
 
@@ -197,11 +207,11 @@ def train(cfg, run_name, train_loader, val_loader):
         val_loss  = np.mean(val_losses)
         if best_loss > val_loss:
             best_loss = val_loss
-            save_model(model, version=RUN_NAME, save_type='loss')
+            save_model(model, version=run_name, save_type='loss')
          
         if best_mIoU < val_mIoU:
             best_mIoU = val_mIoU
-            save_model(model, version=RUN_NAME, save_type='mIoU')
+            save_model(model, version=run_name, save_type='mIoU')
             early_cnt = 0
 
         else :

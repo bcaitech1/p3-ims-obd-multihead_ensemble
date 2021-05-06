@@ -47,11 +47,10 @@ pos_weight = torch.tensor(pos_weight).float().to(device)
   - FocalLoss 
 """
 class FocalLoss(nn.Module):
-    def __init__(self, gamma=2, alpha=.25, eps=1e-7, weights=None):   #weight = pos_weight 주면 됨 
+    def __init__(self, gamma=2, alpha=.25, weights=None):   
         super(FocalLoss, self).__init__()
         self.gamma = gamma
         self.alpha = alpha
-        self.eps = eps
         self.weight = weights
 
     def forward(self, inputs, targets):

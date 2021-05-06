@@ -1,7 +1,11 @@
-
+.ipynb_checkpoints
+config
+submission
 augmix.npy
 ckpts
 results
 wandb
 README.md
 requirements.txt
+src.__pycache__
+src.ipynb_checkpoinsts

@@ -23,7 +23,7 @@ from .utils import *
 from .scheduler import *
 
 
-def train(cfg, run_name, train_loader, val_loader):
+def pseudo_train(cfg, run_name, train_loader, pseudo_loader, val_loader):
     # Set Config
     BACKBONE = cfg.values.backbone
     BACKBONE_WEIGHT = cfg.values.backbone_weight
@@ -83,7 +83,7 @@ def train(cfg, run_name, train_loader, val_loader):
         activation=None,
         classes=12
     )   
-    
+        
     # define model 
     model_module = getattr(import_module('segmentation_models_pytorch'), MODEL_ARC)    
     model = model_module(
@@ -94,70 +94,103 @@ def train(cfg, run_name, train_loader, val_loader):
         aux_params=aux_params
     )
     model.to(device)
-    # 모델 불러오기
-    model.load_state_dict(torch.load('/opt/ml/p3-ims-obd-multihead_ensemble/ckpts/madgrad/best_mIoU.pth'))
+    model.load_state_dict(torch.load('/opt/ml/p3-ims-obd-multihead_ensemble/ckpts/final/best_mIoU.pth'))
     
-
     # define optimizer & scheduler
-    OPTIMIZER = cfg.values.optimizer
+    first_optimizer = MADGRAD(params=model.parameters(),lr=min_lr, weight_decay=0) 
     
-    if OPTIMIZER == 'MADGRAD':
-        optimizer = MADGRAD(params=model.parameters(),lr=min_lr, weight_decay=weight_decay) 
+    SECOND_OPTIMIZER = cfg.values.second_optimizer
+    opt_module = getattr(import_module("torch_optimizer") ,SECOND_OPTIMIZER)
+    second_optimizer = opt_module(params=model.parameters(),lr=min_lr, weight_decay=weight_decay) 
+    optimizer = first_optimizer
         
-    elif OPTIMIZER in ['AdamW' , 'Adam']:
-        opt_module = getattr(import_module("torch.optim") ,OPTIMIZER) #default : Adam
-        optimizer = opt_module(params=model.parameters(),lr=min_lr, weight_decay=weight_decay) 
-        
-    else :
-        opt_module = getattr(import_module("torch_optimizer") ,OPTIMIZER)
-        optimizer = opt_module(params=model.parameters(),lr=min_lr, weight_decay=weight_decay) 
+    first_cycle_steps = (len(train_loader) + len(pseudo_loader)) * num_epochs 
+    scheduler = CosineAnnealingWarmupRestarts(
+        first_optimizer, 
+        first_cycle_steps=first_cycle_steps, 
+        cycle_mult=1.0, 
+        max_lr=max_lr, 
+        min_lr=min_lr, 
+        warmup_steps=int(first_cycle_steps * 0.25), 
+        gamma=0.5
+    )
     
-#     first_cycle_steps = len(train_loader) * num_epochs // 3
-#     scheduler = CosineAnnealingWarmupRestarts(
-#         optimizer, 
-#         first_cycle_steps=first_cycle_steps, 
-#         cycle_mult=1.0, 
-#         max_lr=max_lr, 
-#         min_lr=min_lr, 
-#         warmup_steps=int(first_cycle_steps * 0.25), 
-#         gamma=0.5
-#     )
-    scheduler = None
 
     # criterion 
     CRITEROIN  = cfg.values.criterion
     criterion = criterion = create_criterion(CRITEROIN)
-   
+    auxilary_criterion = nn.BCEWithLogitsLoss()
+    
     best_loss = float("INF")
     best_mIoU = 0
     early_cnt = 0
     EARLY_NUM = cfg.values.early_num
 
     wandb.watch(model)
+    
     for epoch in range(num_epochs):
-        cnt = 1
-
+            
+        ###################################### peusdo ###############################################
         model.train()
-        trn_losses = []
+        psd_losses = []
         hist = np.zeros((12, 12))
-
-        with tqdm(train_loader, total=len(train_loader), unit='batch') as trn_bar:
-            for batch, (images , masks) in enumerate(trn_bar):
-                trn_bar.set_description(f"Train Epoch {epoch+1}")
+        with tqdm(pseudo_loader, total=len(pseudo_loader), unit='batch',ascii=True) as psd_bar:
+            for batch, (images, masks, one_hot_label)  in enumerate(psd_bar):
+                psd_bar.set_description(f"Pseudo Epoch {epoch+1}")
                 images = torch.stack(images)       
-                masks = torch.stack(masks).long()  
+                masks = torch.stack(masks).long()
+                one_hot_label = torch.stack(one_hot_label).float()
                 
                 images, masks = images.to(device), masks.to(device)
+                one_hot_label = one_hot_label.to(device)
                 
-                preds, _ = model(images)
-                loss = criterion(preds, masks)
+                preds , aux_logits = model(images)
+                loss = criterion(preds, masks) + 0.4 * auxilary_criterion(aux_logits, one_hot_label)
                 
                 # compute gradient and do optimizer step
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                if scheduler is not None:
-                    scheduler.step()
+                # if scheduler is not None : 
+                #         scheduler.step()
+
+                preds = torch.argmax(preds, dim=1).detach().cpu().numpy()
+                hist = add_hist(hist, masks.detach().cpu().numpy(), preds, n_class=12)
+                psd_mIoU = label_accuracy_score(hist)[2]
+                psd_losses.append(loss.item())
+
+                wandb.log({
+                    'Learning rate': get_learning_rate(optimizer)[0],
+                    'Pseudo Loss value': np.mean(psd_losses),
+                    'Pseudo mean IoU value': psd_mIoU * 100.0,
+                })
+
+                psd_bar.set_postfix(psd_loss=np.mean(psd_losses), psd_mIoU=psd_mIoU)
+
+                
+        ##################################### train ###############################################
+        model.train()
+        trn_losses = []
+        hist = np.zeros((12, 12))
+
+        with tqdm(train_loader, total=len(train_loader), unit='batch',ascii=True) as trn_bar:
+            for batch, (images, masks, one_hot_label)  in enumerate(trn_bar):
+                trn_bar.set_description(f"Train Epoch {epoch+1}")
+                images = torch.stack(images)       
+                masks = torch.stack(masks).long()
+                one_hot_label = torch.stack(one_hot_label).float()
+                
+                images, masks = images.to(device), masks.to(device)
+                one_hot_label = one_hot_label.to(device)
+                
+                preds , aux_logits = model(images)
+                loss = criterion(preds, masks) + 0.4 * auxilary_criterion(aux_logits, one_hot_label)
+                
+                # compute gradient and do optimizer step
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                # scheduler.step()
 
                 preds = torch.argmax(preds, dim=1).detach().cpu().numpy()
                 hist = add_hist(hist, masks.detach().cpu().numpy(), preds, n_class=12)
@@ -171,14 +204,15 @@ def train(cfg, run_name, train_loader, val_loader):
                 })
 
                 trn_bar.set_postfix(trn_loss=np.mean(trn_losses), trn_mIoU=trn_mIoU)
-            
+        
+        ###################################### eval ###############################################
         model.eval()
         val_losses = []
         hist = np.zeros((12, 12))
         
         with torch.no_grad():
-            with tqdm(val_loader, total=len(val_loader), unit='batch') as val_bar:
-                 for batch, (images , masks) in enumerate(val_bar):
+            with tqdm(val_loader, total=len(val_loader), unit='batch',ascii=True) as val_bar:
+                 for batch, (images , masks, _ ) in enumerate(val_bar):
                     val_bar.set_description(f"Valid Epoch {epoch+1}")
                     
                     images = torch.stack(images)       
@@ -212,10 +246,6 @@ def train(cfg, run_name, train_loader, val_loader):
         if best_mIoU < val_mIoU:
             best_mIoU = val_mIoU
             save_model(model, version=RUN_NAME, save_type='mIoU')
-            early_cnt = 0
 
-        else :
-            early_cnt += 1
         
     wandb.finish()
-    return best_score

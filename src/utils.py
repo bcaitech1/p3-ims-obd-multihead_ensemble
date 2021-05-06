@@ -9,8 +9,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
-# import pydensecrf.densecrf as dcrf
-# import pydensecrf.utils as utils
+import pydensecrf.densecrf as dcrf
+import pydensecrf.utils as utils
 from albumentations.core.transforms_interface import DualTransform
 
 from easydict import EasyDict
@@ -79,15 +79,27 @@ def collate_fn(batch):
 
 
 def get_dataloader(data_dir='train.json', mode='train', transform=None, batch_size=16, shuffle=True, augmix=None, augmix_prob=0, num_workers = 4):
-    dataset = RecycleTrashDataset(data_dir=data_dir, mode=mode, transform=transform, augmix=augmix, augmix_prob=augmix_prob)
-    loader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        num_workers=num_workers,
-        drop_last=True,
-        collate_fn = collate_fn
-    )
+    if mode == 'psuedo' :
+        dataset = PseudoDataset('/opt/ml/input/data/', '/opt/ml/p3-ims-obd-multihead_ensemble/presudo_result_2.csv' ,transform = transform)
+        loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            drop_last=True,
+            collate_fn = collate_fn
+        )
+        
+    else :     
+        dataset = RecycleTrashDataset(data_dir=data_dir, mode=mode, transform=transform, augmix=augmix, augmix_prob=augmix_prob)
+        loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            drop_last=True,
+            collate_fn = collate_fn
+        )
 
     return loader
 

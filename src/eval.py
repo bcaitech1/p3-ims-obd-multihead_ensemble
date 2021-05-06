@@ -3,142 +3,136 @@ import cv2
 import argparse
 import numpy as np
 import pandas as pd
+import multiprocessing as mp
 import albumentations
 import albumentations.pytorch
 import segmentation_models_pytorch as smp
+import torch.nn as nn
+import torch.nn.functional as F
+
 
 from importlib import import_module
 from prettyprinter import cpprint
+from tqdm import tqdm
 
 import torch
-from torch.utils.data import DataLoader
-from torchvision.models import vgg16
 
-from .utils import seed_everything, YamlConfigManager
-from .utils import make_cat_df
-from .utils import cls_colors
-from .dataset import RecycleTrashDataset
-from .model import *
+from src.utils import seed_everything, YamlConfigManager, get_dataloader, dense_crf_wrapper
 
 
-def main(cfg):    
+def test(cfg, crf):    
     SEED = cfg.values.seed    
     BACKBONE = cfg.values.backbone
     MODEL_ARC = cfg.values.model_arc
+    IMAGE_SIZE = cfg.values.image_size
     NUM_CLASSES = cfg.values.num_classes
-    DEBUG = cfg.values.debug
 
-    checkpoint_path = cfg.values.checkpoint_path
+    checkpoint = cfg.values.checkpoint
     test_batch_size = cfg.values.test_batch_size
-
 
     # for reproducibility
     seed_everything(SEED)
 
     data_path = '/opt/ml/input/data'
     test_annot = os.path.join(data_path, 'test.json')
-    test_cat = make_cat_df(test_annot, debug=True)
+    checkpoint_path = 'p3-ims-obd-multihead_ensemble/ckpts'
 
     test_transform = albumentations.Compose([
-        albumentations.Resize(512, 512),
+        albumentations.Resize(IMAGE_SIZE, IMAGE_SIZE),
         albumentations.Normalize(mean=(0.461, 0.440, 0.419), std=(0.211, 0.208, 0.216)),
         albumentations.pytorch.transforms.ToTensorV2()])
-
+    
     size = 256
     resize = albumentations.Resize(size, size)
-
-    test_ds = RecycleTrashDataset(data_dir=test_annot, cat_df=test_cat, mode='test', transform=test_transform)
-    test_dl = DataLoader(dataset=test_ds,
-                         batch_size=test_batch_size,
-                         shuffle=False,
-                         num_workers=3)
+    
+    test_loader = get_dataloader(data_dir='test.json', mode='test', transform=test_transform, batch_size=test_batch_size, shuffle=False)
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     model_module = getattr(import_module('segmentation_models_pytorch'), MODEL_ARC)
 
+#     aux_params=dict(
+#         pooling='avg',
+#         dropout=0.5,
+#         activation=None,
+#         classes=12
+#     )
+
     model = model_module(
         encoder_name=BACKBONE,
         in_channels=3,
-        classes=NUM_CLASSES
+        classes=NUM_CLASSES,
+#         aux_params=aux_params
     )
 
     model = model.to(device)
-    model.load_state_dict(torch.load(os.path.join("./ckpts", checkpoint_path)))
-
+    model.load_state_dict(torch.load(os.path.join(checkpoint_path, checkpoint)))
+    print('Start prediction.')
     model.eval()
-    file_name_list = []
-    preds_array = np.empty((0, size * size), dtype=np.long)
 
-    cnt = 1
+    file_name_list = []
+    preds_array = np.empty((0, size * size), dtype=np.compat.long)
+
     with torch.no_grad():
-        for step, sample in enumerate(test_dl):
-            imgs = sample['image']
-            file_names = sample['info']
+        for step, (imgs, image_infos) in enumerate(tqdm(test_loader, desc='Test : ')):
 
             # inference (512 x 512)
-            preds = model(imgs.to(device))
-            oms = torch.argmax(preds.squeeze(), dim=1).detach().cpu().numpy()
+            outs, _ = model(torch.stack(imgs).to(device))
+            probs = F.softmax(outs, dim=1).data.cpu().numpy()
+            
+            if crf:                
+                pool = mp.Pool(mp.cpu_count())
+                images = torch.stack(imgs).data.cpu().numpy().astype(np.uint8).transpose(0, 2, 3, 1)
+                probs = np.array(pool.map(dense_crf_wrapper, zip(images, probs)))
+                pool.close()
 
-            if DEBUG:
-                debug_path = os.path.join('.', 'debug', 'test', BACKBONE)
-                if not os.path.exists(debug_path):
-                    os.makedirs(debug_path)
-
-                pred_masks = torch.argmax(preds.squeeze(), dim=1).detach().cpu().numpy()
-                for idx, file_name in enumerate(file_names):
-                    pred_mask = pred_masks[idx]
-                    ori_image = cv2.imread(os.path.join('.', 'input', 'data', file_name))
-                    ori_image = ori_image.astype(np.float32)
-
-                    for i in range(1, 12):
-                        a_mask = (pred_mask == i)
-                        cls_mask = np.zeros(ori_image.shape).astype(np.float32)
-                        cls_mask[a_mask] = cls_colors[i]
-                        ori_image[a_mask] = cv2.addWeighted(ori_image[a_mask], 0.2, cls_mask[a_mask], 0.8, gamma=0.0)
-
-                    cv2.imwrite(os.path.join(debug_path, f"{cnt}.jpg"), ori_image)
-                    cnt += 1
-
+            oms = np.argmax(probs, axis=1)
+            
             # resize (256 x 256)
             temp_mask = []
-            temp_images = imgs.permute(0, 2, 3, 1).detach().cpu().numpy()
-            for img, mask in zip(temp_images, oms):
+            for img, mask in zip(np.stack(imgs), oms):
                 transformed = resize(image=img, mask=mask)
                 mask = transformed['mask']
                 temp_mask.append(mask)
 
             oms = np.array(temp_mask)
-
-            oms = oms.reshape([oms.shape[0], size * size]).astype(int)
+            
+            oms = oms.reshape([oms.shape[0], size*size]).astype(int)
             preds_array = np.vstack((preds_array, oms))
-
-            file_name_list.append([file_name for file_name in file_names])
+            
+            file_name_list.append([i['file_name'] for i in image_infos])
     print("End prediction.")
-
-    print("Saving...")
     file_names = [y for x in file_name_list for y in x]
-    submission = pd.read_csv('./submission/sample_submission.csv', index_col=None)
-    for file_name, string in zip(file_names, preds_array):
-        submission = submission.append(
-            {"image_id": file_name, "PredictionString": ' '.join(str(e) for e in string.tolist())},
-            ignore_index=True)
+    
+    return file_names, preds_array
 
-    save_path = './submission'
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
 
-    save_dir = os.path.join(save_path, f'{BACKBONE}.csv')
-    submission.to_csv(save_dir, index=False)
-    print("All done.")
+def make_submission(cfg, crf):
+    # sample_submisson.csv 열기
+    submission = pd.read_csv('../code/submission/sample_submission.csv', index_col=None)
+
+    # test set에 대한 prediction
+    file_names, preds = test(cfg, crf)
+
+    # PredictionString 대입
+    for file_name, string in zip(file_names, preds):
+        submission = submission.append({"image_id" : file_name, "PredictionString" : ' '.join(str(e) for e in string.tolist())}, 
+                                    ignore_index=True)
+
+    # submission.csv로 저장
+    os.makedirs('./submission', exist_ok=True)
+    submission.to_csv(f"./submission/{cfg.values.backbone}_{cfg.values.model_arc}_{args.svae_name}.csv", index=False)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config_file_path', type=str, default='./config/eval_config.yml')
-    parser.add_argument('--config', type=str, default='base')
+    parser.add_argument('--eval_config_file_path', type=str, default='./config/eval_config.yml')
+    parser.add_argument('--eval_config', type=str, default='base')
+    parser.add_argument('--crf', type=bool, default=False)
+    parser.add_argument('--save_name', type=str, default='base')
     
     args = parser.parse_args()
-    cfg = YamlConfigManager(args.config_file_path, args.config)
+    cfg = YamlConfigManager(args.eval_config_file_path, args.eval_config)
     cpprint(cfg.values, sort_dict_keys=False)
     print('\n')
-    main(cfg)
+    print(f'CRF : {args.crf}')
+    make_submission(cfg, args.crf)

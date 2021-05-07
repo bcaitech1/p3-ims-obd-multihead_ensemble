@@ -219,3 +219,29 @@ class ComboLoss(nn.Module):
         combo = (self.ce_ratio * weighted_ce) - ((1 - self.ce_ratio) * dice)
 
         return combo
+
+
+
+from torchgeometry.losses import SSIM
+class OhMyLoss(nn.Module):
+    def __init__(self,alpha = 0.75, beta = 0.25 , gamma = 0.25, weight=None):
+        super(OhMyLoss, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+        self.dice = DiceLoss()
+        self.weight = weight
+        self.ssim = SSIM(window_size=11, reduction='mean')
+
+    def forward(self, inputs, targets):
+        dice_loss = self.dice(inputs , targets)
+        ce_loss = F.cross_entropy(inputs, targets, reduction='mean', weight=self.weight)
+
+        ss_input = F.softmax(inputs, dim=1)
+        ss_input = torch.argmax(ss_input, dim=1, keepdim=True).float()
+        h , w = targets.shape[1] , targets.shape[2]
+        targets = targets.view(-1 , 1, h, w).float()
+        ssim_loss = self.ssim(ss_input, targets)
+
+        triple_loss = self.alpha * ce_loss + self.beta * dice_loss + self.gamma * ssim_loss
+        return triple_loss

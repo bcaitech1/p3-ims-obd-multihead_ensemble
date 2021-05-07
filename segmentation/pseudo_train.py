@@ -2,6 +2,7 @@ import os
 import wandb
 import logging
 import argparse
+import importlib
 import numpy as np
 import albumentations as A
 from collections import defaultdict
@@ -36,6 +37,7 @@ def main():
     parser.add_argument('--cutmix_beta', default=1.0, type=float)
     parser.add_argument('--use_weight', default=1, type=int)
     parser.add_argument('--use_augmix', default=1, type=int)
+    parser.add_argument('--loss_type', default='DiceCELoss', type=str)
 
 
     args = parser.parse_args()
@@ -90,6 +92,14 @@ def main():
         ToTensorV2()
     ])
 
+    pseudo_tfms = A.Compose([
+        A.HorizontalFlip(p=0.5),
+        A.RandomRotate90(p=0.5),
+
+        A.Normalize(),
+        ToTensorV2()
+    ])
+
 
     # define train & valid dataset
     if args.trn_ratio:
@@ -112,7 +122,7 @@ def main():
         val_ds = SegmentationDataset(data_dir=val_annot, cat_df=val_cat, mode='valid', transform=val_tfms)
 
 
-    pseudo_ds = PseudoDataset(data_dir='input', pseudo_csv='pseudo_result2.csv', transform=val_tfms)
+    pseudo_ds = PseudoDataset(data_dir='input', pseudo_csv='pseudo_result2.csv', transform=pseudo_tfms)
 
     # define dataloader
     trn_dl = DataLoader(dataset=trn_ds,
@@ -218,7 +228,8 @@ def main():
         print(normedWeights, "\n")
 
     # criterion = nn.CrossEntropyLoss()
-    criterion = DiceCELoss(weight=normedWeights)
+    # criterion = DiceCELoss(weight=normedWeights)
+    criterion = OhMyLoss(weight=normedWeights)
     # criterion = AmazingCELoss(weight=normedWeights)
     # criterion = IoULoss()
     # criterion = FocalLoss()

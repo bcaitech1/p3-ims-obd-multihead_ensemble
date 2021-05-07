@@ -1,3 +1,3 @@
-python test.py --seed 42 --batch_size 32 --postfix "hrnet_ocr_v15" \
-               --model_type "hrnet_ocr" --ckpt "hrnet_ocr_v15/best_mIoU.pth" \
+python test.py --seed 42 --batch_size 32 --postfix "pseudo_hrnet_ocr_v3" \
+               --model_type "hrnet_ocr" --ckpt "pseudo_hrnet_ocr_v3/best_mIoU.pth" \
                --debug 1

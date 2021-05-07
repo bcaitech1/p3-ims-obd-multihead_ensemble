@@ -138,7 +138,6 @@ def main():
     tta_tfms = tta.Compose(
                         [
                             tta.HorizontalFlip(),
-                            tta.VerticalFlip(),
                             tta.Rotate90([0, 90]),
                         ]
                     )

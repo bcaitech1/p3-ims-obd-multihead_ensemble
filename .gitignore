@@ -131,3 +131,4 @@ debug
 pretrained
 kfold_json
 ckpts
+segmentation/submission

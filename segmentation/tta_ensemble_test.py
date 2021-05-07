@@ -1,3 +1,4 @@
+import ttach as tta
 import os
 import cv2
 import argparse
@@ -59,13 +60,16 @@ def main():
     parser = argparse.ArgumentParser(description="MultiHead Ensemble Team")
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--batch_size', default=2, type=int)
-    parser.add_argument('--postfix', default='effib3_unet_v1', type=str)
-    parser.add_argument('--ckpt', default='effib3_unet_v1/best_mIoU_56_448.pth', type=str)
-    parser.add_argument('--model_type', default='unet', type=str)
+    parser.add_argument('--postfix', required=True, type=str)
+    parser.add_argument('--ckpt', required=True, type=str)
+    parser.add_argument('--model_type', required=True, type=str)
     parser.add_argument('--debug', default=0, type=int)
 
     args = parser.parse_args()
     print(args)
+
+    model_types = args.model_type.split()
+    model_ckpts = args.ckpt.split()
 
     # for reproducibility
     seed_everything(args.seed)
@@ -90,56 +94,38 @@ def main():
                          num_workers=3)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    if args.model_type == "fcn8s":
-        backbone = vgg16(pretrained=False)
-        model = FCN8s(backbone)
-    elif args.model_type == 'unet':
-        model = smp.Unet(
-            encoder_name="efficientnet-b3",  # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
-            encoder_weights="imagenet",
-            in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
-            classes=12,  # model output channels (number of classes in your dataset)
-        )
-    elif args.model_type == "unet_pp":
-        model = smp.UnetPlusPlus(
-            encoder_name="efficientnet-b3",  # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
-            encoder_weights="imagenet",
-            in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
-            classes=12,  # model output channels (number of classes in your dataset)
-        )
-    elif args.model_type == 'deeplabv3':
-        model = smp.DeepLabV3(
-            encoder_name='efficientnet-b0',
-            encoder_weights='imagenet',
-            in_channels=3,
-            classes=12
-        )
-    elif args.model_type == 'hrnet_ocr':
-        import yaml
-        from src.models.hrnet_seg import get_seg_model
+    import yaml
+    from src.models.hrnet_seg import get_seg_model
 
-        config_path = './src/configs/hrnet_seg_ocr.yaml'
-        with open(config_path) as f:
-            cfg = yaml.load(f)
-            cfg['MODEL']['PRETRAINED'] = ''
-        model = get_seg_model(cfg)
-    elif args.model_type == 'hrnet_ocr_tp':
-        import yaml
-        from src.models.hrnet_seg_transpose import get_seg_model
+    models = []
+    tta_tfms = tta.Compose(
+        [
+            tta.HorizontalFlip(),
+            tta.Rotate90([0, 90]),
+        ]
+    )
 
-        config_path = './src/configs/hrnet_seg_ocr.yaml'
-        with open(config_path) as f:
-            cfg = yaml.load(f)
-        model = get_seg_model(cfg)
+    for model_type, model_ckpt in zip(model_types, model_ckpts):
+        print(model_type, model_ckpt, "\n")
 
-    model = model.to(device)
-    model.load_state_dict(torch.load(os.path.join("./ckpts", args.ckpt)))
+        if model_type == 'hrnet_ocr':
+            config_path = './src/configs/hrnet_seg_ocr.yaml'
+            with open(config_path) as f:
+                cfg = yaml.load(f)
+                cfg['MODEL']['PRETRAINED'] = ''
+            model = get_seg_model(cfg, test=True)
 
-    model.eval()
+        model = model.to(device)
+        model.load_state_dict(torch.load(os.path.join("./ckpts", model_ckpt)))
+        tta_model = tta.SegmentationTTAWrapper(model, tta_tfms, merge_mode='mean')
+        tta_model.eval()
+        models.append(tta_model)
+
+
+
+
     file_name_list = []
     preds_array = np.empty((0, size * size), dtype=np.long)
-
-
 
     cnt = 1
     tar_size = 512
@@ -151,24 +137,24 @@ def main():
             file_names = sample['info']
 
             # inference (512 x 512)
-            preds = model(imgs.to(device))
-            if isinstance(preds, list):
-                preds = preds[0]
+            final_probs = 0
+            for model in models:
+                preds = model(imgs.to(device))
                 ph, pw = preds.size(2), preds.size(3)
                 if ph != tar_size or pw != tar_size:
                     preds = F.interpolate(input=preds, size=(
                         tar_size, tar_size), mode='bilinear', align_corners=True)
-            probs = F.softmax(preds, dim=1).detach().cpu().numpy()
+                probs = F.softmax(preds, dim=1).detach().cpu().numpy()
 
-            pool = mp.Pool(mp.cpu_count())
-            images = imgs.detach().cpu().numpy().astype(np.uint8).transpose(0, 2, 3, 1)
-            if images.shape[1] != tar_size or images.shape[2] != tar_size:
-                images = np.stack([resize(image=im)['image'] for im in images], axis=0)
+                pool = mp.Pool(mp.cpu_count())
+                images = imgs.detach().cpu().numpy().astype(np.uint8).transpose(0, 2, 3, 1)
+                if images.shape[1] != tar_size or images.shape[2] != tar_size:
+                    images = np.stack([resize(image=im)['image'] for im in images], axis=0)
 
-            probs = np.array(pool.map(dense_crf_wrapper, zip(images, probs)))
-            pool.close()
+                final_probs += np.array(pool.map(dense_crf_wrapper, zip(images, probs))) / len(models)
+                pool.close()
 
-            oms = np.argmax(probs.squeeze(), axis=1)
+            oms = np.argmax(final_probs.squeeze(), axis=1)
 
             if args.debug:
                 debug_path = os.path.join('.', 'debug', 'test', args.postfix)
@@ -189,7 +175,8 @@ def main():
                         cls_mask[a_mask] = list(cls_colors[i])[-1::-1]
                         ori_image[a_mask] = cv2.addWeighted(ori_image[a_mask], 0.2, cls_mask[a_mask], 0.8, gamma=0.0)
 
-                    cv2.imwrite(os.path.join(debug_path, f"{cnt}.jpg"), ori_image)
+                    label = np.unique(pred_mask)
+                    cv2.imwrite(os.path.join(debug_path, f"{file_name.replace(os.sep, '_')}_{label}.jpg"), ori_image)
                     cnt += 1
 
             # resize (256 x 256)

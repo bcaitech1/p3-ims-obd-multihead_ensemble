@@ -389,8 +389,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--saved_dir", type=str, default="./checkpoints")
     parser.add_argument("--model_name", type=str, default="pspnet")
-    parser.add_argument("--load_path", type=str, default="./checkpoints/exp7")
-    parser.add_argument("--is_load", type=bool, default=False)
+    parser.add_argument("--load_path", type=str, default="./checkpoints/exp9")
+    parser.add_argument("--is_load", type=str2bool, default=False)
     parser.add_argument("--transform", type=str, default="train")
     parser.add_argument("--wandb_name", type=str, default="test")
 

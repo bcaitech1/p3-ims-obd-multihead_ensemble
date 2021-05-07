@@ -5,6 +5,7 @@ import numpy as np
 import pickle as pickle
 import multiprocessing as mp
 from tqdm import tqdm
+import ttach as tta
 
 import torch
 import torch.nn.functional as F
@@ -61,10 +62,18 @@ def inference(args):
     checkpoint = torch.load(model_path, map_location=device)
     model.load_state_dict(checkpoint)
 
+    tta_transform = tta.Compose([
+        tta.HorizontalFlip(),
+        tta.VerticalFlip(),
+        tta.Rotate90([0, 90]),
+    ])
+
+    tta_model = tta.SegmentationTTAWrapper(model, tta_transform, merge_mode='mean')
+    tta_model.eval()
+
     size = 256
     transform = A.Compose([A.Resize(256, 256)])
     print('Start prediction.')
-    model.eval()
     
     file_name_list = []
     preds_array = np.empty((0, size*size), dtype=np.long)
@@ -74,7 +83,8 @@ def inference(args):
         for step, (imgs, image_infos) in enumerate(tqdm(test_loader)):
 
             # inference (512 x 512)
-            outs = model(torch.stack(imgs).float().to(device))
+            # outs = model(torch.stack(imgs).float().to(device))
+            outs = tta_model(torch.stack(imgs).float().to(device))
             if args.is_crf == True:
                 probs = F.softmax(outs, dim=1).data.cpu().numpy()
 
@@ -132,7 +142,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--saved_dir", type=str, default="./checkpoints/exp11")
+    parser.add_argument("--saved_dir", type=str, default="./checkpoints/exp9")
     parser.add_argument("--submission_dir", type=str, default="./submission")
     parser.add_argument("--save_name", type=str, default="unet++_iou")
     parser.add_argument("--is_crf", type=str2bool, default=True)

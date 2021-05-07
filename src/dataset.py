@@ -218,3 +218,39 @@ class AugmixDataLoader(Dataset):
         masks[augmix_mask!= 0] = augmix_mask[augmix_mask != 0]
         
         return images, masks
+
+
+class PseudoDataset(Dataset):
+    def __init__(self, data_dir, pseudo_csv, transform=None):
+        self.data_dir = data_dir
+        self.df = pd.read_csv(os.path.join(data_dir, pseudo_csv))
+        self.tfms = A.Resize(512, 512, interpolation= cv2.INTER_NEAREST)
+
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        img_path = self.df.iloc[idx, 0]
+        img_path = os.path.join(self.data_dir, img_path)
+        mask = self.df.iloc[idx, 1]
+        mask = np.array(list(map(int, mask.split())))
+        mask = mask.reshape(256, 256)
+        mask = self.tfms(image=mask)['image']
+
+        img = cv2.imread(img_path)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.uint8)
+
+        if self.transform is not None:
+            transformed = self.transform(image=img, mask=mask)
+            images = transformed["image"]
+            masks = transformed["mask"]
+
+        # return {
+        #     'image': images,
+        #     'mask': masks,
+        #     'info': img_path
+        # }
+        
+        return images, masks, img_path

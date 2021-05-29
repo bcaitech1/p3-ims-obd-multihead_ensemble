@@ -25,9 +25,9 @@
 ├── Obejct_Detection
 ∣    ├── scripts
 ∣    ├── src
-∣    ├── test_scripts
+∣    └── test_scripts
 ∣
-├── Semantic_Segmentation
+└── Semantic_Segmentation
      ├── experiments
      ├── src
      ∣    ├── configs
@@ -37,7 +37,7 @@
      ∣    ├── losses.py         
      ∣    ├── schedulers.py     
      ∣    ├── utils.py          
-     ∣    ├── warping.py        
+     ∣    └── warping.py        
      ∣
      ├── test_scripts
      ├── augmix_train.py
@@ -46,5 +46,5 @@
      ├── ensemble_test.py
      ├── train_eval.py
      ├── tta_ensemble_test.py
-     ├── tta_test.py
+     └── tta_test.py
 ```

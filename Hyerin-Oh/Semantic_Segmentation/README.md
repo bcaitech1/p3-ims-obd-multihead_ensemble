@@ -6,7 +6,7 @@
 ### 🍀  최종 결과 
 - 1등 (총 21팀)
 - private LB : 0.7043
-- [1등 발표 자료](https://drive.google.com/file/d/1gXRMAgSluj0UkybFLYOQMOAFLcrYsAAs/view?usp=sharing)는 여기서 확인하실 수 있습니다. 
+- [1등 발표 자료](https://github.com/bcaitech1/p3-ims-obd-multihead_ensemble/blob/master/presentation/Pstage3_solution.pdf)는 여기서 확인하실 수 있습니다. 
 
 ---
 ### 📝 문제 정의 및 해결 방법

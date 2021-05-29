@@ -1,0 +1,86 @@
+base:
+  seed: 77
+  backbone: 'timm-efficientnet-b2'
+  model_arc: 'PAN'
+  image_size: 512
+  num_classes: 12
+  checkpoint: '20_epoch_47.08%_with_val.pth'
+  test_batch_size: 16  
+
+DeepLabV3Plus:
+  seed: 77
+  backbone: 'resnext101_32x8d'
+  model_arc: 'DeepLabV3Plus'
+  image_size: 512
+  num_classes: 12
+  checkpoint: '18_epoch_33.91%.pth'
+  test_batch_size: 10
+
+DeepLabV3Plus-b3:
+  seed: 77
+  backbone: 'timm-efficientnet-b3'
+  model_arc: 'DeepLabV3Plus'
+  image_size: 512
+  num_classes: 12
+  checkpoint: '49_epoch_52.56%.pth'
+  test_batch_size: 8
+
+Light:
+  seed: 77
+  backbone: 'timm-efficientnet-b0'
+  model_arc: 'UnetPlusPlus'
+  image_size: 256
+  num_classes: 12
+  checkpoint: '19_epoch_37.51%.pth'
+  test_batch_size: 64
+
+
+DeepLabV3Plus-aux:
+  seed: 77
+  backbone: 'timm-efficientnet-b3'
+  model_arc: 'DeepLabV3Plus'
+  image_size: 512
+  num_classes: 12
+  checkpoint: '38_epoch_54.31%.pth'
+  test_batch_size: 10
+
+
+PANet-aux:
+  seed: 77
+  backbone: 'timm-efficientnet-b3'
+  model_arc: 'PAN'
+  image_size: 512
+  num_classes: 12
+  checkpoint: '35_epoch_52.98%.pth'
+  test_batch_size: 10
+
+
+DeepLabV3Plus-aug-aux:
+  seed: 77
+  backbone: 'timm-efficientnet-b3'
+  model_arc: 'DeepLabV3Plus'
+  image_size: 512
+  num_classes: 12
+  checkpoint: '28_epoch_54.06%.pth'
+  test_batch_size: 10
+
+
+DeepLabV3Plus-aug-aux-b4:
+  seed: 77
+  backbone: 'timm-efficientnet-b4'
+  model_arc: 'DeepLabV3Plus'
+  image_size: 512
+  num_classes: 12
+  checkpoint: '49_epoch_56.73%.pth'
+  test_batch_size: 10
+
+
+HRNet-OCR:
+  seed: 77
+  backbone: 'hrnetv2'
+  model_arc: 'HRNet-OCR'
+  image_size: 512
+  num_classes: 12
+  num_models: 2
+  checkpoints: ['pseudo_best.pth', 'efficientnetb3_UnetPlusPlus.pt']
+  test_batch_size: 10

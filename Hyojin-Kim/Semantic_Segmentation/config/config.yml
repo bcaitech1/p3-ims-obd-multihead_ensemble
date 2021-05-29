@@ -1,0 +1,216 @@
+base:
+  seed: 77
+  backbone: 'timm-efficientnet-b2'
+  backbone_weight: 'noisy-student'
+  model_arc: 'PAN'
+  num_classes: 12
+  image_size: 512
+  output_dir: './results/'
+  train_args:
+    num_epochs: 20
+    train_batch_size: 16
+    max_lr: 0.001
+    min_lr: 0.0001
+    weight_decay: 0.0
+    log_intervals: 10         
+  val_args:    
+    val_batch_size: 16
+  augmix_args:
+    use_augmix: False
+    augmix_prob: 0
+
+DeepLabV3Plus:
+  seed: 77
+  backbone: 'timm-efficientnet-b2'
+  backbone_weight: 'imagenet'
+  model_arc: 'DeepLabV3Plus'
+  num_classes: 12
+  image_size: 512
+  output_dir: './results/'
+  train_args:
+    num_epochs: 30
+    train_batch_size: 16
+    max_lr: 0.001
+    min_lr: 0.0001
+    weight_decay: 0.0
+    log_intervals: 10         
+  val_args:    
+    val_batch_size: 16
+  augmix_args:
+    use_augmix: False
+    augmix_prob: 0
+
+DeepLabV3Plus-b3:
+  seed: 77
+  backbone: 'timm-efficientnet-b3'
+  backbone_weight: 'imagenet'
+  model_arc: 'DeepLabV3Plus'
+  num_classes: 12
+  image_size: 512
+  output_dir: './results/'
+  train_args:
+    num_epochs: 50
+    train_batch_size: 10
+    max_lr: 0.0001
+    min_lr: 0.00001
+    weight_decay: 0.0
+    log_intervals: 10         
+  val_args:    
+    val_batch_size: 10
+  augmix_args:
+    use_augmix: False
+    augmix_prob: 0
+
+
+Light:
+  seed: 77
+  backbone: 'timm-efficientnet-b0'
+  backbone_weight: 'imagenet'
+  model_arc: 'UnetPlusPlus'
+  image_size: 256
+  num_classes: 12
+  output_dir: './results/'
+  train_args:
+    num_epochs: 40
+    train_batch_size: 64
+    max_lr: 0.001
+    min_lr: 0.0001
+    weight_decay: 0.0
+    log_intervals: 10
+  val_args:    
+    val_batch_size: 64
+  augmix_args:
+    use_augmix: False
+    augmix_prob: 0
+
+
+UNetPlusPlus:
+  seed: 77
+  backbone: 'timm-efficientnet-b3'
+  backbone_weight: 'imagenet'
+  model_arc: 'UnetPlusPlus'
+  image_size: 512
+  num_classes: 12
+  output_dir: './results/'
+  train_args:
+    num_epochs: 50
+    train_batch_size: 10
+    max_lr: 0.001
+    min_lr: 0.00005
+    weight_decay: 0.0
+    log_intervals: 10
+  val_args:    
+    val_batch_size: 10
+  augmix_args:
+    use_augmix: False
+    augmix_prob: 0
+
+
+DeepLabV3Plus-aux:
+  seed: 77
+  backbone: 'timm-efficientnet-b3'
+  backbone_weight: 'imagenet'
+  model_arc: 'DeepLabV3Plus'
+  num_classes: 12
+  image_size: 512
+  output_dir: './results/'
+  train_args:
+    num_epochs: 40
+    train_batch_size: 10
+    max_lr: 0.001
+    min_lr: 0.00005
+    weight_decay: 0.0
+    log_intervals: 10
+  val_args:    
+    val_batch_size: 10
+  augmix_args:
+    use_augmix: False
+    augmix_prob: 0
+
+
+PANet-aux:
+  seed: 77
+  backbone: 'timm-efficientnet-b3'
+  backbone_weight: 'imagenet'
+  model_arc: 'PAN'
+  num_classes: 12
+  image_size: 512
+  output_dir: './results/'
+  train_args:
+    num_epochs: 50
+    train_batch_size: 10
+    max_lr: 0.0001
+    min_lr: 0.00001
+    weight_decay: 0.0
+    log_intervals: 10
+  val_args:    
+    val_batch_size: 10
+  augmix_args:
+    use_augmix: True
+    augmix_prob: 0.5
+
+
+DeepLabV3Plus-aug-aux-b4:
+  seed: 77
+  backbone: 'timm-efficientnet-b4'
+  backbone_weight: 'noisy-student'
+  model_arc: 'DeepLabV3Plus'
+  num_classes: 12
+  image_size: 512
+  output_dir: './results/'
+  train_args:
+    num_epochs: 50
+    train_batch_size: 10
+    max_lr: 0.0001
+    min_lr: 0.00001
+    weight_decay: 0.0
+    accumulation_step: 3
+  val_args:    
+    val_batch_size: 10
+  augmix_args:
+    use_augmix: True
+    augmix_prob: 0.15
+
+
+HRNet-OCR:
+  seed: 130
+  backbone: 'HRNet'
+  backbone_weight: '/opt/ml/vim-hjk/src/pretrained/hrnetv2_w48_imagenet_pretrained.pth'
+  model_arc: 'HRNet-OCR'
+  num_classes: 12
+  image_size: 512
+  output_dir: './results/'
+  train_args:
+    num_epochs: 50
+    train_batch_size: 10
+    max_lr: 0.0001
+    min_lr: 0.00001
+    weight_decay: 0.0000001
+    accumulation_step: 3
+  val_args:    
+    val_batch_size: 10
+  augmix_args:
+    use_augmix: True
+    augmix_prob: 0.15
+
+
+add-HRNet-OCR-presudo:
+  seed: 1611
+  backbone: 'HRNet'
+  backbone_weight: '/opt/ml/vim-hjk/src/pretrained/hrnetv2_w48_imagenet_pretrained.pth'
+  model_arc: 'HRNet-OCR'
+  num_classes: 12
+  image_size: 512
+  output_dir: './results/'
+  train_args:
+    num_epochs: 25
+    train_batch_size: 10
+    max_lr: 0.00003
+    min_lr: 0.00001
+    weight_decay: 0.0000001
+    accumulation_step: 3
+  val_args:    
+    val_batch_size: 10
+  augmix_args:
+    use_augmix: True
+    augmix_prob: 0.15

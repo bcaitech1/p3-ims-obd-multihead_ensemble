@@ -19,5 +19,5 @@ Baseline-v2
     - `python inference.py --limit x`
 ---
 ### Demo
-- ![demo](./prediction/PAN/29.jpg) 
+- ![demo](./prediction/DeepLabV3Plus/836.jpg) 
 

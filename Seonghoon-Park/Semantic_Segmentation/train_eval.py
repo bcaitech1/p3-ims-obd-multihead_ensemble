@@ -160,7 +160,7 @@ def main():
         )
 
 
-    # 로스 바꾸자
+    # 상황에 맞게 loss 바꾸어 쓰기
     criterion = DiceCELoss()
 
     logger = logging.getLogger("Segmentation")

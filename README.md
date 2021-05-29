@@ -2,11 +2,11 @@
 
 ## 📋 Table of content
 
-[팀 소개](#Team)<br>
-[최종 결과](#Result)<br>
-[대회 개요](#Overview)<br>
-[문제 정의 해결 및 방법](#Solution)<br>
-[CODE 설명](#Code)<br>
+- [팀 소개](#Team)<br>
+- [최종 결과](#Result)<br>
+- [대회 개요](#Overview)<br>
+- [문제 정의 해결 및 방법](#Solution)<br>
+- [CODE 설명](#Code)<br>
 
 <br></br>
 ## 👋 팀 소개 <a name = 'Team'></a>

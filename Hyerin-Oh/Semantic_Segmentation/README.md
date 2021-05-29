@@ -38,6 +38,7 @@
 <br></br>
 
 ####   - 소스 설명 
+`segmentation_models_pytorch`를 이용하였습니다.
 - `main.py` : data를 받아서 train까지 한 번에 실행
 - `datset.py` : train / val dataset 생성 (object aug를 사용할 지 선택 가능)
 - `losses.py` : semantic segmentation loss 모아놓은 코드 , import module을 통해 불러와서 train시 사용

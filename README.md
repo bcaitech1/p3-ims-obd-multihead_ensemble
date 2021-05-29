@@ -23,7 +23,7 @@
 - Semantic Segmentaion :
     - private LB : 0.7043 (1등)
     - Public LB :  0.7205 (1등)
-    - [1등 발표자료](https://www.notion.so/MultiHead_Ensemble-a6d4e3db725a4588ab18ab7ea2551c92#0ace36d4004d4f17913cc543888fa0bd) 
+    - [1등 발표자료](https://github.com/bcaitech1/p3-ims-obd-multihead_ensemble/blob/master/presentation/Pstage3_solution.pdf) 
 - Object Detection :
     - private LB : 0.5014 (2등)
     - Public LB :  0.6068 (3등)

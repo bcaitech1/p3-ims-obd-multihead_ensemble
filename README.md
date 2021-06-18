@@ -62,3 +62,9 @@
 <br></br>
 ## 💻 CODE 설명<a name = 'Code'></a>
 - 자세한 CODE 설명은 개인 폴더 내 README.md를 통해 확인하실 수 있습니다. 
+    - [김유지](./Yuji-Kim)
+    - [김홍엽](./Hongyeob-Kim)
+    - [김효진](./Hyojin-Kim)
+    - [박성배](./SongBae)
+    - [박성훈](./Seonghoon-Park)
+    - [오혜린](./Hyerin-Oh)

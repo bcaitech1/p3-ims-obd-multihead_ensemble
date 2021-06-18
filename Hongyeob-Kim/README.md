@@ -16,8 +16,8 @@
 
 - [[Object Detection]](http://boostcamp.stages.ai/competitions/35/overview/description)
     - 2등 (총 21팀)
-    - Public  LB : 0.0668
-    - private LB : 0.7043
+    - Public  LB : 0.6068
+    - private LB : 0.5014
     - [[Code]](./Object_Detection/)
 ---
 ### 🗄 폴더 구조

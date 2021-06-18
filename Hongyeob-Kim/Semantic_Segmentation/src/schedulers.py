@@ -1,3 +1,5 @@
+### https://github.com/katsura-jp/pytorch-cosine-annealing-with-warmup
+
 import math
 import torch
 from torch.optim.lr_scheduler import _LRScheduler

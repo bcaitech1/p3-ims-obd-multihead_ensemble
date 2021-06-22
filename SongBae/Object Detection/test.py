@@ -12,7 +12,6 @@ from pandas import DataFrame
 from pycocotools.coco import COCO
 import numpy as np
 from src.dataset import *
-
 def denormalize_image(image, mean, std):
         img_cp = image.copy()
         img_cp *= std
